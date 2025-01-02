@@ -1,0 +1,32 @@
+[package]
+name = "native-components"
+version = "0.1.0"
+edition = "2024"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+notify-rust = "4"
+tao = "0.31"
+tray-icon = { version = "0.19", default-features = false }
+tokio = { version = "1.43", features = ["rt", "sync", "macros"] }
+# discord-presence = { version = "1.4", features = ["activity_type"] }
+
+[target.'cfg(unix)'.dependencies]
+zbus = { version = "5.2", default-features = false, features = ["async-io"] }
+futures-util = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", features = [
+    "Media",
+    "Media_Control",
+    "Foundation",
+    "Foundation_Collections",
+    "ApplicationModel",
+] }
+windows-registry = "0.4.0"
