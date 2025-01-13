@@ -2,7 +2,6 @@ use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionInfo {
-    pub session_id: String,
     pub app_id: String,
     pub app_name: String,
 }
@@ -10,7 +9,6 @@ pub struct SessionInfo {
 #[derive(Serialize, Debug, Clone)]
 pub struct MetadataInfo {
     pub app_id: String,
-    pub session_id: String,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -22,7 +20,6 @@ pub struct MetadataInfo {
 #[derive(Serialize, Debug, Clone)]
 pub struct PlaybackInfo {
     pub app_id: String,
-    pub session_id: String,
     pub state: PlaybackState,
     pub position: i64,
     pub can_skip: bool,
@@ -31,7 +28,6 @@ pub struct PlaybackInfo {
 #[derive(Serialize, Debug, Clone)]
 pub struct TimelineInfo {
     pub app_id: String,
-    pub session_id: String,
     pub duration: i64,
     pub position: i64,
 }

@@ -156,7 +156,6 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
 
         let session_info = SessionInfo {
             app_id: app_id.clone(),
-            session_id: app_id.clone(),
             app_name,
         };
 
@@ -301,7 +300,6 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
 
     let playback_info = PlaybackInfo {
         app_id: app_id.clone(),
-        session_id: app_id.clone(),
         state,
         can_skip,
         position,
@@ -342,7 +340,6 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
 
         let metadata_info = MetadataInfo {
             app_id: app_id.clone(),
-            session_id: app_id.clone(),
             title,
             artist,
             album,
@@ -377,7 +374,6 @@ fn handle_timeline_properties_changed(
 
     let timeline_info = TimelineInfo {
         app_id: app_id.clone(),
-        session_id: app_id.clone(),
         duration,
         position,
     };
@@ -389,7 +385,6 @@ fn handle_timeline_properties_changed(
     let playback_info = if let Some(existing_playback_info) = existing_playback_info {
         PlaybackInfo {
             app_id: app_id.clone(),
-            session_id: app_id.clone(),
             state: existing_playback_info.state.clone(),
             can_skip: existing_playback_info.can_skip,
             position,
@@ -397,7 +392,6 @@ fn handle_timeline_properties_changed(
     } else {
         PlaybackInfo {
             app_id: app_id.clone(),
-            session_id: app_id.clone(),
             state: PlaybackState::None,
             can_skip: false,
             position,

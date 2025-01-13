@@ -1,4 +1,8 @@
-use std::{collections::HashMap, str::FromStr, sync::OnceLock};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::OnceLock,
+};
 
 use futures_util::stream::StreamExt;
 use tokio::{
@@ -36,10 +40,9 @@ static CONNECTION: OnceLock<Connection> = OnceLock::new();
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener() -> zbus::Result<()> {
-    // let mut names_to_handles_mut = HashMap::<String, PlayerListenerHandle>::new();
     let names_to_handles: RwLock<HashMap<String, PlayerListenerHandle>> =
         RwLock::new(HashMap::new());
-    let session_infos_map: RwLock<HashMap<String, SessionInfo>> = RwLock::new(HashMap::new());
+    let session_infos: RwLock<HashSet<SessionInfo>> = RwLock::new(HashSet::new());
 
     if CONNECTION.get().is_none() {
         let connection = Connection::session().await?;
@@ -68,26 +71,21 @@ pub async fn listener() -> zbus::Result<()> {
                 MediaPlayer2Proxy::new(CONNECTION.get().unwrap(), dbus_name.as_str().to_owned())
                     .await?;
             let identity = media_player2_proxy.identity().await.unwrap_or_default();
-            let unique_name = dbus_proxy.get_name_owner((&dbus_name).into()).await?;
 
             let session_info = SessionInfo {
-                session_id: unique_name.to_string(),
                 app_id: dbus_name.to_string(),
                 app_name: identity,
             };
-            session_infos_map
-                .write()
-                .await
-                .insert(dbus_name.to_string(), session_info.clone());
+            session_infos.write().await.insert(session_info);
 
-            start_tracking_player(&session_info, &mut names_to_handles.write().await);
+            start_tracking_player(dbus_name.to_string(), &mut names_to_handles.write().await);
         }
     }
 
-    let active_players = session_infos_map
+    let active_players = session_infos
         .read()
         .await
-        .values()
+        .iter()
         .cloned()
         .collect::<Vec<_>>();
     send_active_players(&active_players);
@@ -127,12 +125,14 @@ pub async fn listener() -> zbus::Result<()> {
                     }
 
                     IncomingPlayerEvent::RefreshSessions => {
-                        for (app_id, session_info) in session_infos_map.read().await.iter() {
+                        for session_info in session_infos.read().await.iter() {
+                            let app_id = &session_info.app_id;
+
                             if is_app_allowed(app_id)
                                 && !names_to_handles.read().await.contains_key(app_id)
                             {
                                 start_tracking_player(
-                                    session_info,
+                                    app_id.to_string(),
                                     &mut names_to_handles.write().await,
                                 );
                             }
@@ -140,18 +140,17 @@ pub async fn listener() -> zbus::Result<()> {
                             if !is_app_allowed(app_id)
                                 && names_to_handles.read().await.contains_key(app_id)
                             {
-                                stop_tracking_player(
-                                    &session_info.app_id,
-                                    &mut names_to_handles.write().await,
-                                );
+                                stop_tracking_player(names_to_handles.write().await.remove(app_id));
                             }
                         }
                     }
 
                     IncomingPlayerEvent::Shutdown => {
-                        for app_id in session_infos_map.read().await.keys() {
-                            stop_tracking_player(app_id, &mut names_to_handles.write().await);
+                        for (_app_id, handle) in names_to_handles.write().await.drain() {
+                            stop_tracking_player(Some(handle));
                         }
+
+                        session_infos.write().await.clear();
 
                         // produce some error to stop the tasks
                         return zbus::Result::Err(zbus::Error::Unsupported);
@@ -184,27 +183,32 @@ pub async fn listener() -> zbus::Result<()> {
                     let identity = media_player2_proxy.identity().await?;
 
                     let session_info = SessionInfo {
-                        session_id: new_owner.as_ref().unwrap().to_string(),
                         app_id: dbus_name.to_string(),
                         app_name: identity,
                     };
-                    session_infos_map
-                        .write()
-                        .await
-                        .insert(dbus_name.to_string(), session_info.clone());
+                    session_infos.write().await.insert(session_info);
 
-                    start_tracking_player(&session_info, &mut names_to_handles.write().await);
+                    start_tracking_player(
+                        dbus_name.to_string(),
+                        &mut names_to_handles.write().await,
+                    );
                 }
 
                 // handle player removed
                 if old_owner.is_some() && new_owner.is_none() {
-                    stop_tracking_player(dbus_name, &mut names_to_handles.write().await);
+                    stop_tracking_player(names_to_handles.write().await.remove(dbus_name));
+
+                    // remove the entry from session_infos
+                    session_infos
+                        .write()
+                        .await
+                        .retain(|session_info| session_info.app_id != dbus_name);
                 }
 
-                let active_players = session_infos_map
+                let active_players = session_infos
                     .read()
                     .await
-                    .values()
+                    .iter()
                     .cloned()
                     .collect::<Vec<_>>();
                 send_active_players(&active_players);
@@ -218,12 +222,12 @@ pub async fn listener() -> zbus::Result<()> {
 
 async fn player_listeners(
     connection: &Connection,
-    session_info: SessionInfo,
+    app_id: String,
     mut incoming_player_event_rx: Receiver<IncomingPlayerEvent>,
 ) -> zbus::Result<()> {
     let player_proxy = PlayerProxy::builder(connection)
         .uncached_properties(&["Position"])
-        .destination(session_info.app_id.clone())?
+        .destination(app_id.clone())?
         .build()
         .await?;
 
@@ -232,12 +236,12 @@ async fn player_listeners(
     let mut prev_volume = player_proxy.volume().await.unwrap_or_default();
 
     let metadata = player_proxy.metadata().await.unwrap_or_default();
-    parse_and_send_metadata(&session_info, metadata);
+    parse_and_send_metadata(&app_id, metadata);
 
     let playback_status = player_proxy.playback_status().await.unwrap_or_default();
     let can_go_next = player_proxy.can_go_next().await.unwrap_or_default();
     let position = player_proxy.position().await.unwrap_or_default();
-    parse_and_send_playback_state(&session_info, playback_status, can_go_next, position);
+    parse_and_send_playback_state(&app_id, playback_status, can_go_next, position);
 
     let mut metadata_changed = player_proxy.receive_metadata_changed().await;
     let mut playback_status_changed = player_proxy.receive_playback_status_changed().await;
@@ -250,7 +254,7 @@ async fn player_listeners(
         async {
             while let Some(metadata_changed) = metadata_changed.next().await {
                 let metadata = metadata_changed.get().await.unwrap_or_default();
-                parse_and_send_metadata(&session_info, metadata);
+                parse_and_send_metadata(&app_id, metadata);
             }
 
             zbus::Result::Ok(())
@@ -260,7 +264,7 @@ async fn player_listeners(
                 let playback_status = playback_status_changed.get().await.unwrap_or_default();
                 let position = player_proxy.position().await.unwrap_or_default();
                 parse_and_send_playback_state(
-                    &session_info,
+                    &app_id,
                     playback_status,
                     player_proxy
                         .cached_can_go_next()
@@ -276,7 +280,7 @@ async fn player_listeners(
                 let can_go_next = can_go_next_changed.get().await.unwrap_or_default();
                 let position = player_proxy.position().await.unwrap_or_default();
                 parse_and_send_playback_state(
-                    &session_info,
+                    &app_id,
                     player_proxy
                         .cached_playback_status()
                         .unwrap_or_default()
@@ -306,7 +310,7 @@ async fn player_listeners(
                     if let Ok(seek_args) = seek_changed.args() {
                         let position = *seek_args.Position();
                         parse_and_send_playback_state(
-                            &session_info,
+                            &app_id,
                             player_proxy
                                 .cached_playback_status()
                                 .unwrap_or_default()
@@ -354,38 +358,32 @@ async fn player_listeners(
 }
 
 fn start_tracking_player(
-    session_info: &SessionInfo,
+    app_id: String,
     names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
 ) {
-    if is_app_allowed(&session_info.app_id) {
+    if is_app_allowed(&app_id) {
         let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
 
         let join_handle = tokio::spawn(player_listeners(
             CONNECTION.get().unwrap(),
-            session_info.clone(),
+            app_id.clone(),
             rx,
         ));
 
-        names_to_handles.insert(session_info.app_id.clone(), PlayerListenerHandle {
+        names_to_handles.insert(app_id, PlayerListenerHandle {
             join_handle,
             incoming_player_event_tx: tx,
         });
     }
 }
 
-fn stop_tracking_player(
-    dbus_name: &str,
-    names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
-) {
-    if let Some(handle) = names_to_handles.remove(dbus_name) {
+fn stop_tracking_player(handle: Option<PlayerListenerHandle>) {
+    if let Some(handle) = handle {
         handle.join_handle.abort();
     }
 }
 
-fn parse_and_send_metadata(
-    session_info: &SessionInfo,
-    metadata: HashMap<String, zvariant::OwnedValue>,
-) {
+fn parse_and_send_metadata(app_id: &str, metadata: HashMap<String, zvariant::OwnedValue>) {
     // debug print
     // for (key, value) in &metadata {
     //     println!("  {}: {:?}", key, value);
@@ -401,8 +399,7 @@ fn parse_and_send_metadata(
         .cloned();
 
     let metadata_info = MetadataInfo {
-        app_id: session_info.app_id.clone(),
-        session_id: session_info.session_id.clone(),
+        app_id: app_id.to_owned(),
         title: metadata.title().unwrap_or_default().to_string(),
         artist: first_artist.unwrap_or_default(),
         album: metadata.album_name().unwrap_or_default().to_string(),
@@ -415,7 +412,7 @@ fn parse_and_send_metadata(
 }
 
 fn parse_and_send_playback_state(
-    session_info: &SessionInfo,
+    app_id: &str,
     playback_status: String,
     can_go_next: bool,
     position: i64,
@@ -423,8 +420,7 @@ fn parse_and_send_playback_state(
     let playback_status = PlaybackState::from_str(&playback_status).unwrap_or(PlaybackState::Other);
 
     let playback_info = PlaybackInfo {
-        app_id: session_info.app_id.clone(),
-        session_id: session_info.session_id.clone(),
+        app_id: app_id.to_owned(),
         state: playback_status,
         position,
         can_skip: can_go_next,
