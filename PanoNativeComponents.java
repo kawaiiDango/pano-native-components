@@ -10,6 +10,10 @@ public class PanoNativeComponents {
 
     private static native void startEventLoop(PanoNativeComponents callback);
 
+    private static native void stopEventLoop();
+
+    static native void setEnvironmentVariable(String key, String value);
+
     static native void setAllowedAppIds(String[] appIds);
 
     static native void stopListeningMedia();
@@ -22,11 +26,7 @@ public class PanoNativeComponents {
 
     static native void notify(String title, String body, String iconPath);
 
-    static native void setTrayIcon(int[] argb, int width, int height);
-
-    static native void setTrayTooltip(String tooltip);
-
-    static native void setTrayMenu(String[] menuItemIds, String[] menuItemTexts);
+    static native void setTray(String tooltip, int[] argb, int icon_size, String[] menuItemIds, String[] menuItemTexts);
 
     static native String getMachineId();
 
@@ -40,6 +40,7 @@ public class PanoNativeComponents {
 
     public static void main(String[] args) {
         System.out.println(ping("hello " + getMachineId()));
+        setEnvironmentVariable("GDK_BACKEND", "x11");
 
         new Thread(new Runnable() {
             @Override
@@ -73,19 +74,16 @@ public class PanoNativeComponents {
                     e.printStackTrace();
                 }
 
-                setTrayTooltip("tooltip");
+                // test tray icon
                 String menuItemIds[] = new String[] { "1", "2", "3", "Separator", "4" };
                 String menuItemTexts[] = new String[] { "item1", "item2", "item3", "", "item4" };
-                setTrayMenu(menuItemIds, menuItemTexts);
-
-                // test tray icon
 
                 int size = 8;
                 int[] argb = new int[size * size];
                 for (int i = 0; i < argb.length; i++) {
                     argb[i] = 0xffff0000;
                 }
-                setTrayIcon(argb, size, size);
+                setTray("tooltip", argb, size, menuItemIds, menuItemTexts);
 
                 System.out.println("allowing apps");
                 setAllowedAppIds(new String[] {

@@ -1,7 +1,7 @@
 use notify_rust::Notification;
 
 pub fn notify(title: &str, body: &str, icon_path: &str) {
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         use crate::windows_registry_stuff;
         use std::sync::Once;
@@ -21,10 +21,10 @@ pub fn notify(title: &str, body: &str, icon_path: &str) {
 
     notification.summary(title).body(body).timeout(10000);
 
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     notification.app_id(crate::windows_registry_stuff::AUMID);
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     notification.appname("pano-scrobbler").icon(icon_path);
 
     if let Err(e) = notification.show() {

@@ -21,11 +21,11 @@ use zbus::{
 use crate::{
     INCOMING_PLAYER_EVENT_TX, is_app_allowed,
     media_info_structs::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState},
-    media_listener::unix_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
+    media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
     on_metadata_changed, on_playback_state_changed,
 };
 use crate::{
-    media_info_structs::SessionInfo, media_listener::unix_mpris::metadata::Metadata,
+    media_info_structs::SessionInfo, media_listener::linux_mpris::metadata::Metadata,
     on_active_sessions_changed,
 };
 

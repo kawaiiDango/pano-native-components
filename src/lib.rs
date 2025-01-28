@@ -1,11 +1,13 @@
+mod event_loop;
+mod machine_uid;
 mod media_info_structs;
 mod media_listener;
 mod notifications;
-mod tao_event_loop;
+mod pano_tray;
 mod user_event;
 mod windows_registry_stuff;
-mod machine_uid;
 
+use event_loop::send_user_event;
 use jni::sys::{jboolean, jint};
 
 use jni::JNIEnv;
@@ -13,14 +15,14 @@ use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString, ReleaseMod
 
 use media_info_structs::IncomingPlayerEvent;
 use media_listener::listener;
-use tao::event_loop::EventLoopProxy;
+use pano_tray::PanoTray;
 use tokio::sync::mpsc;
 use user_event::UserEvent;
 
 use std::collections::HashSet;
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::env;
+use std::sync::{LazyLock, Mutex};
 
-static JAVA_CALLBACK_PROXY: OnceLock<EventLoopProxy<UserEvent>> = OnceLock::new();
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
@@ -105,6 +107,28 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopListeningM
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopEventLoop(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    send_user_event(UserEvent::ShutdownEventLoop);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setEnvironmentVariable(
+    mut env: JNIEnv,
+    _class: JClass,
+    key: JString,
+    value: JString,
+) {
+    let key: String = env.get_string(&key).unwrap().into();
+    let value: String = env.get_string(&value).unwrap().into();
+    unsafe {
+        env::set_var(key, value);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_skip(
     mut env: JNIEnv,
     _class: JClass,
@@ -161,13 +185,20 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_notify(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayIcon(
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
     mut env: JNIEnv,
     _class: JClass,
+    tooltip: JString,
     argb: JIntArray,
-    width: jint,
-    height: jint,
+    icon_dim: jint,
+    menu_item_ids: JObjectArray,
+    menu_item_texts: JObjectArray,
 ) {
+    let tooltip: String = env
+        .get_string(&tooltip)
+        .expect("Couldn't get java string!")
+        .into();
+
     let len: usize = env.get_array_length(&argb).unwrap().try_into().unwrap();
 
     let argb_rust = unsafe {
@@ -175,44 +206,24 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayIcon(
             .unwrap()
     };
 
-    let width = width as u32;
-    let height = height as u32;
+    // convert the argb packed ints to argb bytes
 
-    // convert the argb packed ints to rgba bytes
-
-    let mut rgba_rust = Vec::<u8>::with_capacity(len * 4);
+    let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
 
     for &argb in argb_rust.iter() {
-        rgba_rust.push(((argb >> 16) & 0xFF) as u8); // R
-        rgba_rust.push(((argb >> 8) & 0xFF) as u8); // G
-        rgba_rust.push((argb & 0xFF) as u8); // B
-        rgba_rust.push(((argb >> 24) & 0xFF) as u8); // A
+        let a = (argb >> 24) as u8;
+        let r = (argb >> 16) as u8;
+        let g = (argb >> 8) as u8;
+        let b = argb as u8;
+
+        icon_argb.push(a);
+        icon_argb.push(r);
+        icon_argb.push(g);
+        icon_argb.push(b);
     }
 
-    send_user_event(UserEvent::UpdateTrayIcon(rgba_rust, width, height));
-}
+    let icon_dim: u32 = icon_dim as u32;
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayTooltip(
-    mut env: JNIEnv,
-    _class: JClass,
-    tooltip: JString,
-) {
-    let tooltip: String = env
-        .get_string(&tooltip)
-        .expect("Couldn't get java string!")
-        .into();
-
-    send_user_event(UserEvent::UpdateTrayTooltip(tooltip));
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayMenu(
-    mut env: JNIEnv,
-    _class: JClass,
-    menu_item_ids: JObjectArray,
-    menu_item_texts: JObjectArray,
-) {
     let len = env.get_array_length(&menu_item_ids).unwrap();
     let mut menu_items = Vec::<(String, String)>::with_capacity(len.try_into().unwrap());
 
@@ -238,7 +249,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayMenu(
         menu_items.push((id, text));
     }
 
-    send_user_event(UserEvent::UpdateTrayMenu(menu_items));
+    send_user_event(UserEvent::UpdateTray(PanoTray {
+        tooltip,
+        icon_argb,
+        icon_dim,
+        menu_items,
+    }));
 }
 
 #[unsafe(no_mangle)]
@@ -257,7 +273,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStart
     exe_path: JString,
     add: jboolean,
 ) -> jboolean {
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         let exe_path: String = env.get_string(&exe_path).unwrap().into();
         let add = add != 0;
@@ -270,7 +286,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStart
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     {
         0
     }
@@ -282,7 +298,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
     _class: JClass,
     exe_path: JString,
 ) -> jboolean {
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         let exe_path: String = env.get_string(&exe_path).unwrap().into();
 
@@ -295,7 +311,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(target_os = "windows"))]
     {
         0
     }
@@ -341,17 +357,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
 //     // Wait until the thread has started.
 //     rx.recv().unwrap();
 // }
-
-fn send_user_event(user_event: UserEvent) {
-    if let Some(proxy) = JAVA_CALLBACK_PROXY.get() {
-        match proxy.send_event(user_event) {
-            Ok(_) => {}
-            Err(e) => eprintln!("Error sending message to event loop: {}", e),
-        }
-    } else {
-        eprintln!("Event loop not running");
-    }
-}
 
 fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
     let tx = INCOMING_PLAYER_EVENT_TX.lock().unwrap();
@@ -430,7 +435,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startEventLoop
 ) {
     let global_ref_callback = env.new_global_ref(callback).unwrap();
     let jvm = env.get_java_vm().unwrap();
-    tao_event_loop::tao_event_loop(move |method_name, msg| {
+    event_loop::event_loop(move |method_name, msg| {
         let mut env = jvm.attach_current_thread().unwrap();
         string_tx_call_me_back(&mut env, &global_ref_callback, &method_name, &msg);
     });

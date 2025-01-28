@@ -22,11 +22,7 @@ pub struct ParseErr(pub String);
 
 impl std::fmt::Display for ParseErr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Couldn't parse `{}`",
-            self.0
-        )
+        write!(f, "Couldn't parse `{}`", self.0)
     }
 }
 
@@ -42,7 +38,6 @@ impl ::std::str::FromStr for PlaybackState {
         }
     }
 }
-
 
 impl std::error::Error for ParseErr {}
 

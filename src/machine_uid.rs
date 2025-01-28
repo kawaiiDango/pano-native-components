@@ -1,6 +1,5 @@
 // adapted from the machine-uid crate
 
-
 #[cfg(target_os = "linux")]
 pub mod machine_id {
     use std::error::Error;
@@ -63,7 +62,6 @@ mod machine_id {
 pub mod machine_id {
     use std::error::Error;
     use windows_registry::LOCAL_MACHINE;
-
 
     /// Return machine id
     pub fn get_machine_id() -> Result<String, Box<dyn Error>> {
