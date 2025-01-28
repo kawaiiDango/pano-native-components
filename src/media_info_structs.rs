@@ -42,6 +42,9 @@ pub enum PlaybackState {
     Other,
 }
 
+#[cfg(target_os = "macos")]
+use crate::media_listener::MediaRemoteEvent;
+
 #[derive(Debug, Clone)]
 pub enum IncomingPlayerEvent {
     Skip(String),
@@ -49,4 +52,6 @@ pub enum IncomingPlayerEvent {
     Unmute(String),
     RefreshSessions,
     Shutdown,
+    #[cfg(target_os = "macos")]
+    MediaRemote(MediaRemoteEvent),
 }

@@ -2,7 +2,10 @@ mod event_loop;
 mod machine_uid;
 mod media_info_structs;
 mod media_listener;
+
+#[cfg(not(target_os = "macos"))]
 mod notifications;
+
 mod pano_tray;
 mod user_event;
 mod windows_registry_stuff;
@@ -177,11 +180,14 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_notify(
     body: JString,
     icon_path: JString,
 ) {
-    let title: String = env.get_string(&title).unwrap().into();
-    let body: String = env.get_string(&body).unwrap().into();
-    let icon_path: String = env.get_string(&icon_path).unwrap().into();
+    #[cfg(not(target_os = "macos"))]
+    {
+        let title: String = env.get_string(&title).unwrap().into();
+        let body: String = env.get_string(&body).unwrap().into();
+        let icon_path: String = env.get_string(&icon_path).unwrap().into();
 
-    notifications::notify(&title, &body, &icon_path);
+        notifications::notify(&title, &body, &icon_path);
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -358,7 +364,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
 //     rx.recv().unwrap();
 // }
 
-fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
+pub fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
     let tx = INCOMING_PLAYER_EVENT_TX.lock().unwrap();
 
     if let Some(ref sender) = *tx {

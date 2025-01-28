@@ -15,3 +15,6 @@ pub use windows_smtc::listener;
 
 #[cfg(target_os = "macos")]
 pub use macos_mediaremote::listener;
+
+#[cfg(target_os = "macos")]
+pub use macos_mediaremote::mediaremote_event::MediaRemoteEvent;

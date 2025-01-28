@@ -92,6 +92,7 @@ public class PanoNativeComponents {
                             "org.mpris.MediaPlayer2.Lollypop",
                             "org.mpris.MediaPlayer2.elisa",
                             "org.mpris.MediaPlayer2.plasma-browser-integration",
+                            "com.apple.Music",
                 });
                 try {
                     Thread.sleep(5000);

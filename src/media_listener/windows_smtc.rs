@@ -15,7 +15,7 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus,
 };
 
-pub static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
+static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static APP_NAMES_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
