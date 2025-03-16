@@ -8,19 +8,19 @@ https://github.com/KDE/kdeconnect-kde
 
 (if building for linux)
 
-sudo pacman -S gtk3 libayatana-appindicator
+sudo pacman -S gtk3
 
 or
 
-sudo apt install libgtk-3-dev libayatana-appindicator3-dev
-
-
-javac -h . PanoNativeComponents.java
+sudo apt install libgtk-3-dev
 
 cargo build --release
 
 
+
 To test: 
+
+javac -h . PanoNativeComponents.java
 
 cargo build --release && javac -d . PanoNativeComponents.java && java -Djava.library.path=target/release/ com.arn.scrobble.PanoNativeComponents
 

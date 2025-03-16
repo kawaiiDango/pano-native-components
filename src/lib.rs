@@ -68,8 +68,8 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_ping<'local>(
 
     // Then we have to create a new java string to return. Again, more info
     // in the `strings` module.
-    let output = env.new_string(input).expect("Couldn't create java string!");
-    output
+    
+    env.new_string(input).expect("Couldn't create java string!")
 }
 
 #[unsafe(no_mangle)]

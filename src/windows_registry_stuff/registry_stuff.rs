@@ -9,7 +9,7 @@ pub fn add_remove_startup(exe_path: &str, add: bool) -> Result<(), Box<dyn std::
     let key = CURRENT_USER.create(REG_PATH)?;
 
     if add {
-        key.set_string(REG_NAME, &format!("\"{}\" -m", exe_path))?;
+        key.set_string(REG_NAME, format!("\"{}\" -m", exe_path))?;
     } else {
         key.remove_value(REG_NAME)?;
     }

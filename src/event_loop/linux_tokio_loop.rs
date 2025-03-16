@@ -37,7 +37,8 @@ impl ksni::Tray for PanoTray {
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        let menu = self
+    
+        self
             .menu_items
             .iter()
             .map(|(id, text)| {
@@ -57,9 +58,7 @@ impl ksni::Tray for PanoTray {
                     }),
                 }
             })
-            .collect();
-
-        menu
+            .collect()
     }
 }
 

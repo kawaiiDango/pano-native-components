@@ -1,5 +1,5 @@
 use std::{
-    mem::transmute, ops::Deref, path::Path, sync::{LazyLock, Mutex, OnceLock}
+    mem::transmute, path::Path, sync::{LazyLock, Mutex, OnceLock}
 };
 
 use block2::RcBlock;

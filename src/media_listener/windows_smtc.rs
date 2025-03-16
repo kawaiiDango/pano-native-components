@@ -12,7 +12,8 @@ use windows::ApplicationModel::AppInfo;
 use windows::Foundation::TypedEventHandler;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
-    GlobalSystemMediaTransportControlsSessionPlaybackStatus,
+    GlobalSystemMediaTransportControlsSessionPlaybackStatus, MediaPropertiesChangedEventArgs,
+    PlaybackInfoChangedEventArgs, SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
 };
 
 static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
@@ -43,8 +44,11 @@ pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
 
     let sessions_changed_token = manager
-        .SessionsChanged(&TypedEventHandler::new(move |m, _| {
-            match m {
+        .SessionsChanged(&TypedEventHandler::<
+            GlobalSystemMediaTransportControlsSessionManager,
+            SessionsChangedEventArgs,
+        >::new(move |m, _| {
+            match m.as_ref() {
                 Some(m) => {
                     update_sessions(m);
                 }
@@ -208,8 +212,11 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
         }
 
         let playback_info_changed_token = session
-            .PlaybackInfoChanged(&TypedEventHandler::new(move |session, _| {
-                match session {
+            .PlaybackInfoChanged(&TypedEventHandler::<
+                GlobalSystemMediaTransportControlsSession,
+                PlaybackInfoChangedEventArgs,
+            >::new(move |session, _| {
+                match session.as_ref() {
                     Some(session) => {
                         handle_playback_info_changed(session);
                     }
@@ -222,8 +229,11 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .expect("Failed to set PlaybackInfoChanged event handler");
 
         let media_properties_changed_token = session
-            .MediaPropertiesChanged(&TypedEventHandler::new(move |session, _| {
-                match session {
+            .MediaPropertiesChanged(&TypedEventHandler::<
+                GlobalSystemMediaTransportControlsSession,
+                MediaPropertiesChangedEventArgs,
+            >::new(move |session, _| {
+                match session.as_ref() {
                     Some(session) => {
                         handle_media_properties_changed(session);
                     }
@@ -236,8 +246,11 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .expect("Failed to set MediaPropertiesChanged event handler");
 
         let timeline_properties_changed_token = session
-            .TimelinePropertiesChanged(&TypedEventHandler::new(move |session, _| {
-                match session {
+            .TimelinePropertiesChanged(&TypedEventHandler::<
+                GlobalSystemMediaTransportControlsSession,
+                TimelinePropertiesChangedEventArgs,
+            >::new(move |session, _| {
+                match session.as_ref() {
                     Some(session) => {
                         handle_timeline_properties_changed(session);
                     }
