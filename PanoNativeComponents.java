@@ -34,13 +34,17 @@ public class PanoNativeComponents {
 
     static native boolean isAddedToStartupWin(String exePath);
 
+    static native boolean isSingleInstance(String name);
+
     static {
         System.loadLibrary("native_components");
     }
 
     public static void main(String[] args) {
-        System.out.println(ping("hello " + getMachineId()));
+        System.out.println(ping("🪼hello " + getMachineId()));
         setEnvironmentVariable("GDK_BACKEND", "x11");
+        boolean singleInstance = isSingleInstance("aaa");
+        System.out.println("isSingleInstance: " + singleInstance);
 
         new Thread(new Runnable() {
             @Override
@@ -76,7 +80,7 @@ public class PanoNativeComponents {
 
                 // test tray icon
                 String menuItemIds[] = new String[] { "1", "2", "3", "Separator", "4" };
-                String menuItemTexts[] = new String[] { "item1", "item2", "item3", "", "item4" };
+                String menuItemTexts[] = new String[] { "📝 item1", "item2", "item3", "", "item4" };
 
                 int size = 8;
                 int[] argb = new int[size * size];
@@ -89,10 +93,15 @@ public class PanoNativeComponents {
                 setAllowedAppIds(new String[] {
                             "Spotify.exe",
                             "MusicBee.exe",
+                            "foobar2000.exe",
+                            "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App",
                             "org.mpris.MediaPlayer2.Lollypop",
-                            "org.mpris.MediaPlayer2.elisa",
+                            // "org.mpris.MediaPlayer2.elisa",
                             "org.mpris.MediaPlayer2.plasma-browser-integration",
                             "com.apple.Music",
+                            "org.mpris.MediaPlayer2.cider",
+                            "org.mpris.MediaPlayer2.cider.instancen",
+
                 });
                 try {
                     Thread.sleep(5000);

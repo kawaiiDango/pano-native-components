@@ -430,7 +430,7 @@ fn fetch_app_name(bundle_id: &str) -> Option<String> {
 }
 
 pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
-    let (tx_incoming_event, mut rx_incoming_event) = mpsc::channel(1);
+    let (tx_incoming_event, mut rx_incoming_event) = mpsc::channel(100);
 
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(tx_incoming_event);
 

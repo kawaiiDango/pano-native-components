@@ -1,5 +1,5 @@
 use crate::media_info_structs::{
-    IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo, TimelineInfo,
+    IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo,
 };
 use crate::{
     INCOMING_PLAYER_EVENT_TX, is_app_allowed, log_warn, on_active_sessions_changed,
@@ -17,6 +17,9 @@ use windows::Media::Control::{
 };
 
 static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static METADATA_INFO_CACHE: LazyLock<Mutex<HashMap<String, MetadataInfo>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 static APP_NAMES_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
@@ -37,7 +40,7 @@ static CALLBACK_TOKENS_MAP: LazyLock<Mutex<HashMap<String, CallbackTokens>>> =
 // based on https://github.com/KDE/kdeconnect-kde/blob/master/plugins/mpriscontrol/mpriscontrolplugin-win.cpp
 
 pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, mut rx) = mpsc::channel(1);
+    let (tx, mut rx) = mpsc::channel(100);
 
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(tx);
 
@@ -109,6 +112,7 @@ pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
                 // clear caches
                 callback_tokens_map.clear();
                 PLAYBACK_INFO_CACHE.lock().unwrap().clear();
+                METADATA_INFO_CACHE.lock().unwrap().clear();
                 APP_NAMES_CACHE.lock().unwrap().clear();
                 PREV_APP_IDS.lock().unwrap().clear();
 
@@ -171,7 +175,8 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
         .cloned()
         .collect::<HashSet<String>>();
 
-    if current_app_ids != *PREV_APP_IDS.lock().unwrap() {
+    let mut prev_app_ids = PREV_APP_IDS.lock().unwrap();
+    if current_app_ids != *prev_app_ids {
         on_active_sessions_changed(
             serde_json::to_string(
                 &all_session_infos_map
@@ -182,7 +187,15 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .unwrap(),
         );
 
-        *PREV_APP_IDS.lock().unwrap() = current_app_ids;
+        // remove cache for removed sessions
+        // todo: also remove session listeners
+        for app_id in prev_app_ids.difference(&current_app_ids) {
+            CALLBACK_TOKENS_MAP.lock().unwrap().remove(app_id);
+            PLAYBACK_INFO_CACHE.lock().unwrap().remove(app_id);
+            METADATA_INFO_CACHE.lock().unwrap().remove(app_id);
+        }
+
+        *prev_app_ids = current_app_ids;
     }
 
     for session in manager.GetSessions().unwrap().into_iter() {
@@ -193,16 +206,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
 
         // remove listeners for removed sessions
         if !is_app_allowed(&app_id) {
-            let tokens = CALLBACK_TOKENS_MAP.lock().unwrap().remove(&app_id);
-
-            if let Some(tokens) = tokens {
-                let _ = session.RemovePlaybackInfoChanged(tokens.playback_info_changed);
-                let _ = session.RemoveMediaPropertiesChanged(tokens.media_properties_changed);
-                let _ = session.RemoveTimelinePropertiesChanged(tokens.timeline_properties_changed);
-
-                PLAYBACK_INFO_CACHE.lock().unwrap().remove(&app_id);
-            }
-
+            remove_session(&session, &app_id);
             continue;
         }
 
@@ -276,6 +280,20 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
 
         handle_media_properties_changed(&session);
         handle_playback_info_changed(&session);
+        handle_timeline_properties_changed(&session);
+    }
+}
+
+fn remove_session(session: &GlobalSystemMediaTransportControlsSession, app_id: &str) {
+    let tokens = CALLBACK_TOKENS_MAP.lock().unwrap().remove(app_id);
+
+    if let Some(tokens) = tokens {
+        let _ = session.RemovePlaybackInfoChanged(tokens.playback_info_changed);
+        let _ = session.RemoveMediaPropertiesChanged(tokens.media_properties_changed);
+        let _ = session.RemoveTimelinePropertiesChanged(tokens.timeline_properties_changed);
+
+        PLAYBACK_INFO_CACHE.lock().unwrap().remove(app_id);
+        METADATA_INFO_CACHE.lock().unwrap().remove(app_id);
     }
 }
 
@@ -284,46 +302,54 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
         .GetPlaybackInfo()
         .expect("Failed to get playback info");
 
-    let playback_state_smtc = playback_info
-        .PlaybackStatus()
-        .expect("Failed to get playback status");
+    let playback_state_smtc = playback_info.PlaybackStatus();
 
-    let state = match playback_state_smtc {
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused => PlaybackState::Paused,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus::Stopped => PlaybackState::Stopped,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus::Changing => PlaybackState::Waiting,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus::Closed
-        | GlobalSystemMediaTransportControlsSessionPlaybackStatus::Opened => PlaybackState::None,
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing => PlaybackState::Playing,
-        _ => PlaybackState::Other,
-    };
+    if let Ok(playback_state_smtc) = playback_state_smtc {
+        let state = match playback_state_smtc {
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused => {
+                PlaybackState::Paused
+            }
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Stopped => {
+                PlaybackState::Stopped
+            }
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Changing
+            | GlobalSystemMediaTransportControlsSessionPlaybackStatus::Opened => {
+                PlaybackState::Waiting
+            }
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Closed => PlaybackState::None,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing => {
+                PlaybackState::Playing
+            }
+            _ => PlaybackState::Other,
+        };
 
-    let playback_controls = playback_info
-        .Controls()
-        .expect("Failed to get playback controls");
+        let playback_controls = playback_info
+            .Controls()
+            .expect("Failed to get playback controls");
 
-    let can_skip = playback_controls.IsNextEnabled().unwrap_or_default();
+        let can_skip = playback_controls.IsNextEnabled().unwrap_or_default();
 
-    let app_id = session
-        .SourceAppUserModelId()
-        .unwrap_or_default()
-        .to_string();
+        let app_id = session
+            .SourceAppUserModelId()
+            .unwrap_or_default()
+            .to_string();
 
-    let position = handle_timeline_properties_changed(session).position;
+        let playback_info = PlaybackInfo {
+            app_id: app_id.clone(),
+            state,
+            can_skip,
+            position: -1, // this will be updated later from timeline properties
+        };
 
-    let playback_info = PlaybackInfo {
-        app_id: app_id.clone(),
-        state,
-        can_skip,
-        position,
-    };
+        // insert into PLAYBACK_INFO_CACHE
 
-    // insert into PLAYBACK_INFO_CACHE
+        let mut cache = PLAYBACK_INFO_CACHE.lock().unwrap();
+        cache.insert(app_id, playback_info.clone());
 
-    let mut cache = PLAYBACK_INFO_CACHE.lock().unwrap();
-    cache.insert(app_id, playback_info.clone());
-
-    on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+        on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+    } else {
+        log_warn("Failed to get playback state");
+    }
 }
 
 fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsSession) {
@@ -348,8 +374,21 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             .unwrap_or_default()
             .to_string();
         let track_number = media_properties.TrackNumber().unwrap_or_default();
+        // let genres = media_properties
+        //     .Genres()
+        //     .map(|x| x.GetAt(0).unwrap_or_default().to_string())
+        //     .ok();
+        // let playback_type = media_properties
+        //     .PlaybackType()
+        //     .map(|x| x.Value().unwrap_or(windows::Media::MediaPlaybackType(0)))
+        //     .ok();
 
-        let duration = handle_timeline_properties_changed(session).duration;
+        // println!("Genres: {:?}", genres);
+        // println!("Playback Type: {:?}", playback_type);
+
+        // get the existing duration if available
+        let mut cache = METADATA_INFO_CACHE.lock().unwrap();
+        let existing_duration = cache.get(&app_id).map(|x| x.duration).unwrap_or(-1);
 
         let metadata_info = MetadataInfo {
             app_id: app_id.clone(),
@@ -358,8 +397,10 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             album,
             album_artist,
             track_number,
-            duration,
+            duration: existing_duration, // this will be updated later from timeline properties
         };
+
+        cache.insert(app_id.clone(), metadata_info.clone());
 
         on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
     } else {
@@ -367,51 +408,85 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
     }
 }
 
-fn handle_timeline_properties_changed(
-    session: &GlobalSystemMediaTransportControlsSession,
-) -> TimelineInfo {
-    let timeline_properties = session
-        .GetTimelineProperties()
-        .expect("Failed to get timeline properties");
+fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportControlsSession) {
+    let timeline_properties = session.GetTimelineProperties();
 
-    let app_id = session
-        .SourceAppUserModelId()
-        .expect("Failed to get app ID")
-        .to_string();
+    if let Ok(timeline_properties) = timeline_properties {
+        let app_id = session
+            .SourceAppUserModelId()
+            .expect("Failed to get app ID")
+            .to_string();
 
-    // Duration is in ns, convert to ms
-    let duration = (timeline_properties.EndTime().unwrap_or_default().Duration
-        - timeline_properties.StartTime().unwrap_or_default().Duration)
-        / 10000;
-    let position = timeline_properties.Position().unwrap_or_default().Duration / 10000;
+        // Duration is in ns, convert to ms
+        // some players dont report timeline properties, handle that with -1
+        let end_time = timeline_properties
+            .EndTime()
+            .map(|x| x.Duration / 10000)
+            .unwrap_or(-1);
+        let start_time = timeline_properties
+            .StartTime()
+            .map(|x| x.Duration / 10000)
+            .unwrap_or_default();
 
-    let timeline_info = TimelineInfo {
-        app_id: app_id.clone(),
-        duration,
-        position,
-    };
+        let duration = if end_time == -1 {
+            -1
+        } else {
+            end_time - start_time
+        };
 
-    let cache = PLAYBACK_INFO_CACHE.lock().unwrap();
+        let position = timeline_properties
+            .Position()
+            .map(|x| x.Duration / 10000)
+            .unwrap_or(-1);
 
-    let existing_playback_info = cache.get(&app_id);
+        // println!("position: {}, duration: {}", position, duration);
 
-    let playback_info = if let Some(existing_playback_info) = existing_playback_info {
-        PlaybackInfo {
-            app_id: app_id.clone(),
-            state: existing_playback_info.state.clone(),
-            can_skip: existing_playback_info.can_skip,
-            position,
+        // on windows, the duration may get updated much later than the media properties
+        if duration != -1 {
+            let mut cache = METADATA_INFO_CACHE.lock().unwrap();
+            let existing_metadata_info = cache.get(&app_id);
+            if let Some(existing_metadata_info) = existing_metadata_info {
+                if existing_metadata_info.duration != duration {
+                    let mut metadata_info = existing_metadata_info.clone();
+                    metadata_info.duration = duration;
+
+                    // update the cache
+                    cache.insert(app_id.clone(), metadata_info.clone());
+
+                    // report the updated metadata
+                    on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
+                }
+            }
+        }
+
+        if position != -1 {
+            let mut cache = PLAYBACK_INFO_CACHE.lock().unwrap();
+
+            let existing_playback_info = cache.get(&app_id);
+
+            if let Some(existing_playback_info) = existing_playback_info {
+                if existing_playback_info.position == -1 || position < 1500 {
+                    // todo figure something out to prevent the spam
+                    let mut playback_info = existing_playback_info.clone();
+                    playback_info.position = position;
+
+                    // update the cache
+                    cache.insert(app_id.clone(), playback_info.clone());
+
+                    // report the updated playback info
+                    on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+                }
+            } else {
+                let playback_info = PlaybackInfo {
+                    app_id: app_id.clone(),
+                    state: PlaybackState::None,
+                    can_skip: false,
+                    position,
+                };
+                on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+            };
         }
     } else {
-        PlaybackInfo {
-            app_id: app_id.clone(),
-            state: PlaybackState::None,
-            can_skip: false,
-            position,
-        }
-    };
-
-    on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
-
-    timeline_info
+        log_warn("Failed to get timeline properties");
+    }
 }

@@ -12,7 +12,7 @@ pub fn notify(title: &str, body: &str, icon_path: &str) {
             let result = windows_registry_stuff::register_aumid_if_needed(icon_path);
 
             if let Err(e) = result {
-                eprintln!("Error registering AUMID: {}", e);
+                eprintln!("Error registering AUMID: {e}");
             }
         });
     }
@@ -28,6 +28,6 @@ pub fn notify(title: &str, body: &str, icon_path: &str) {
     notification.appname("pano-scrobbler").icon(icon_path);
 
     if let Err(e) = notification.show() {
-        eprintln!("Error showing notification: {:?}", e);
+        eprintln!("Error showing notification: {e:?}");
     }
 }

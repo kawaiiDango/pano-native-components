@@ -7,6 +7,7 @@ mod media_listener;
 mod notifications;
 
 mod pano_tray;
+mod single_instance;
 mod user_event;
 mod windows_registry_stuff;
 
@@ -19,6 +20,7 @@ use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString, ReleaseMod
 use media_info_structs::IncomingPlayerEvent;
 use media_listener::listener;
 use pano_tray::PanoTray;
+use single_instance::SingleInstance;
 use tokio::sync::mpsc;
 use user_event::UserEvent;
 
@@ -68,7 +70,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_ping<'local>(
 
     // Then we have to create a new java string to return. Again, more info
     // in the `strings` module.
-    
+
+    println!("Ping: {input}");
+
     env.new_string(input).expect("Couldn't create java string!")
 }
 
@@ -83,12 +87,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
     for i in 0..env.get_array_length(&app_ids).unwrap() {
         let value = env.get_object_array_element(&app_ids, i);
         let app_id = value.unwrap();
-        let app_id = env
-            .get_string(&JString::from(app_id))
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
+        let app_id = env.get_string(&JString::from(app_id)).unwrap().into();
         new_allow_list.insert(app_id);
     }
 
@@ -236,21 +235,11 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
     for i in 0..len {
         let id = env.get_object_array_element(&menu_item_ids, i);
         let id = id.unwrap();
-        let id = env
-            .get_string(&JString::from(id))
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
+        let id = env.get_string(&JString::from(id)).unwrap().into();
 
         let text = env.get_object_array_element(&menu_item_texts, i);
         let text = text.unwrap();
-        let text = env
-            .get_string(&JString::from(text))
-            .unwrap()
-            .to_str()
-            .unwrap_or_else(|e| panic!("Couldn't decode string: {}", e))
-            .to_string();
+        let text = env.get_string(&JString::from(text)).unwrap().into();
 
         menu_items.push((id, text));
     }
@@ -273,6 +262,36 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getMachineId<'
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isSingleInstance(
+    mut env: JNIEnv,
+    _class: JClass,
+    name: JString,
+) -> jboolean {
+    let name: String = env
+        .get_string(&name)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let instance = SingleInstance::new(&name);
+
+    match instance {
+        Ok(instance) => {
+            if instance.is_single() {
+                Box::leak(Box::new(instance));
+                1
+            } else {
+                drop(instance);
+                0
+            }
+        }
+        Err(e) => {
+            eprintln!("Error creating single instance: {e}");
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStartupWin(
     mut env: JNIEnv,
     _class: JClass,
@@ -285,7 +304,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStart
         let add = add != 0;
 
         if let Err(e) = windows_registry_stuff::add_remove_startup(&exe_path, add) {
-            eprintln!("Error adding/removing from startup: {}", e);
+            eprintln!("Error adding/removing from startup: {e}");
             0
         } else {
             1
@@ -311,7 +330,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
         match windows_registry_stuff::is_added_to_startup(&exe_path) {
             Ok(is_added) => is_added as jboolean,
             Err(e) => {
-                eprintln!("Error checking if added to startup: {}", e);
+                eprintln!("Error checking if added to startup: {e}");
                 0
             }
         }
@@ -370,10 +389,10 @@ pub fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
     if let Some(ref sender) = *tx {
         match sender.blocking_send(incoming_event) {
             Ok(_) => {}
-            Err(e) => eprintln!("Error sending message to channel: {}", e),
+            Err(e) => eprintln!("Error sending message to channel: {e}"),
         }
     } else {
-        eprintln!("Sender not initialized");
+        eprintln!("Sender not initialized, did not send {incoming_event:?}");
     }
 }
 
@@ -424,12 +443,15 @@ fn string_tx_call_me_back(env: &mut JNIEnv, callback: &JObject, java_method_name
     let java_msg = env
         .new_string(msg)
         .unwrap_or_else(|_| panic!("Couldn't create java string for {java_method_name}"));
-    let result = env.call_method(callback, java_method_name, "(Ljava/lang/String;)V", &[
-        (&java_msg).into(),
-    ]);
+    let result = env.call_method(
+        callback,
+        java_method_name,
+        "(Ljava/lang/String;)V",
+        &[(&java_msg).into()],
+    );
 
     if let Err(e) = result {
-        eprintln!("Error calling java method {}: {}", java_method_name, e);
+        eprintln!("Error calling java method {java_method_name}: {e}");
     }
 }
 
@@ -453,6 +475,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
     _class: JClass,
 ) {
     if let Err(e) = listener() {
-        log_warn(&format!("Error listening for media: {}", e));
+        // zbus::Error::Unsupported is a dummy error that I create on linux
+        log_warn(&format!("Error listening for media: {e}"));
     }
 }

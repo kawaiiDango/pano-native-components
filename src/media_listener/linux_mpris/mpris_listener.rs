@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::OnceLock,
+    time::Duration,
 };
 
 use futures_util::stream::StreamExt;
@@ -11,6 +12,7 @@ use tokio::{
         mpsc::{self, Receiver, Sender},
     },
     task::JoinHandle,
+    time::timeout,
 };
 use zbus::{
     Connection,
@@ -38,8 +40,25 @@ struct PlayerListenerHandle {
 
 static CONNECTION: OnceLock<Connection> = OnceLock::new();
 
+async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
+    let media_player2_proxy = match MediaPlayer2Proxy::new(connection, dbus_name).await {
+        Ok(proxy) => proxy,
+        Err(_) => return String::new(),
+    };
+
+    // some chromium instances await forever for identity
+
+    match timeout(Duration::from_millis(200), media_player2_proxy.identity()).await {
+        Ok(Ok(id)) => id,
+        _ => String::new(),
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener() -> zbus::Result<()> {
+    let (all_players_tx, mut all_players_rx) = mpsc::channel(100);
+    *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(all_players_tx);
+
     let names_to_handles: RwLock<HashMap<String, PlayerListenerHandle>> =
         RwLock::new(HashMap::new());
     let session_infos: RwLock<HashSet<SessionInfo>> = RwLock::new(HashSet::new());
@@ -49,8 +68,6 @@ pub async fn listener() -> zbus::Result<()> {
         CONNECTION.get_or_init(|| connection);
     }
 
-    let (all_players_tx, mut all_players_rx) = mpsc::channel(1);
-    *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(all_players_tx);
     let dbus_proxy = DBusProxy::new(CONNECTION.get().unwrap()).await?;
 
     // listener just started, poll existing values
@@ -67,18 +84,15 @@ pub async fn listener() -> zbus::Result<()> {
             .await
             .contains_key(dbus_name.as_str())
         {
-            let media_player2_proxy =
-                MediaPlayer2Proxy::new(CONNECTION.get().unwrap(), dbus_name.as_str().to_owned())
-                    .await?;
-            let identity = media_player2_proxy.identity().await.unwrap_or_default();
-
             let session_info = SessionInfo {
                 app_id: dbus_name.to_string(),
-                app_name: identity,
+                app_name: get_identity(CONNECTION.get().unwrap(), &dbus_name).await,
             };
             session_infos.write().await.insert(session_info);
 
-            start_tracking_player(dbus_name.to_string(), &mut names_to_handles.write().await);
+            if is_app_allowed(&normalize_dbus_name(&dbus_name)) {
+                start_tracking_player(dbus_name.to_string(), &mut names_to_handles.write().await);
+            }
         }
     }
 
@@ -126,21 +140,24 @@ pub async fn listener() -> zbus::Result<()> {
 
                     IncomingPlayerEvent::RefreshSessions => {
                         for session_info in session_infos.read().await.iter() {
-                            let app_id = &session_info.app_id;
+                            let app_id_normalized = normalize_dbus_name(&session_info.app_id);
+                            let is_allowed = is_app_allowed(&app_id_normalized);
+                            let is_tracking = names_to_handles
+                                .read()
+                                .await
+                                .contains_key(&app_id_normalized);
 
-                            if is_app_allowed(app_id)
-                                && !names_to_handles.read().await.contains_key(app_id)
-                            {
+                            if is_allowed && !is_tracking {
                                 start_tracking_player(
-                                    app_id.to_string(),
+                                    session_info.app_id.to_string(),
                                     &mut names_to_handles.write().await,
                                 );
                             }
 
-                            if !is_app_allowed(app_id)
-                                && names_to_handles.read().await.contains_key(app_id)
-                            {
-                                stop_tracking_player(names_to_handles.write().await.remove(app_id));
+                            if !is_allowed && is_tracking {
+                                stop_tracking_player(
+                                    names_to_handles.write().await.remove(&session_info.app_id),
+                                );
                             }
                         }
                     }
@@ -177,21 +194,18 @@ pub async fn listener() -> zbus::Result<()> {
                     && new_owner.is_some()
                     && !names_to_handles.read().await.contains_key(dbus_name)
                 {
-                    let media_player2_proxy =
-                        MediaPlayer2Proxy::new(CONNECTION.get().unwrap(), dbus_name.to_owned())
-                            .await?;
-                    let identity = media_player2_proxy.identity().await?;
-
                     let session_info = SessionInfo {
                         app_id: dbus_name.to_string(),
-                        app_name: identity,
+                        app_name: get_identity(CONNECTION.get().unwrap(), dbus_name).await,
                     };
                     session_infos.write().await.insert(session_info);
 
-                    start_tracking_player(
-                        dbus_name.to_string(),
-                        &mut names_to_handles.write().await,
-                    );
+                    if is_app_allowed(&normalize_dbus_name(dbus_name)) {
+                        start_tracking_player(
+                            dbus_name.to_string(),
+                            &mut names_to_handles.write().await,
+                        );
+                    }
                 }
 
                 // handle player removed
@@ -240,7 +254,11 @@ async fn player_listeners(
 
     let playback_status = player_proxy.playback_status().await.unwrap_or_default();
     let can_go_next = player_proxy.can_go_next().await.unwrap_or_default();
-    let position = player_proxy.position().await.unwrap_or_default();
+    let position = player_proxy
+        .position()
+        .await
+        .map(|x| x / 1000)
+        .unwrap_or(-1);
     parse_and_send_playback_state(&app_id, playback_status, can_go_next, position);
 
     let mut metadata_changed = player_proxy.receive_metadata_changed().await;
@@ -262,7 +280,11 @@ async fn player_listeners(
         async {
             while let Some(playback_status_changed) = playback_status_changed.next().await {
                 let playback_status = playback_status_changed.get().await.unwrap_or_default();
-                let position = player_proxy.position().await.unwrap_or_default();
+                let position = player_proxy
+                    .position()
+                    .await
+                    .map(|x| x / 1000)
+                    .unwrap_or(-1);
                 parse_and_send_playback_state(
                     &app_id,
                     playback_status,
@@ -278,7 +300,11 @@ async fn player_listeners(
         async {
             while let Some(can_go_next_changed) = can_go_next_changed.next().await {
                 let can_go_next = can_go_next_changed.get().await.unwrap_or_default();
-                let position = player_proxy.position().await.unwrap_or_default();
+                let position = player_proxy
+                    .position()
+                    .await
+                    .map(|x| x / 1000)
+                    .unwrap_or(-1);
                 parse_and_send_playback_state(
                     &app_id,
                     player_proxy
@@ -308,7 +334,7 @@ async fn player_listeners(
             if let Ok(mut seek_changed) = seek_changed {
                 while let Some(seek_changed) = seek_changed.next().await {
                     if let Ok(seek_args) = seek_changed.args() {
-                        let position = *seek_args.Position();
+                        let position = *seek_args.Position() / 1000;
                         parse_and_send_playback_state(
                             &app_id,
                             player_proxy
@@ -361,25 +387,36 @@ fn start_tracking_player(
     app_id: String,
     names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
 ) {
-    if is_app_allowed(&app_id) {
-        let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
+    let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
 
-        let join_handle = tokio::spawn(player_listeners(
-            CONNECTION.get().unwrap(),
-            app_id.clone(),
-            rx,
-        ));
+    let join_handle = tokio::spawn(player_listeners(
+        CONNECTION.get().unwrap(),
+        app_id.clone(),
+        rx,
+    ));
 
-        names_to_handles.insert(app_id, PlayerListenerHandle {
+    names_to_handles.insert(
+        app_id,
+        PlayerListenerHandle {
             join_handle,
             incoming_player_event_tx: tx,
-        });
-    }
+        },
+    );
 }
 
 fn stop_tracking_player(handle: Option<PlayerListenerHandle>) {
     if let Some(handle) = handle {
         handle.join_handle.abort();
+    }
+}
+
+fn normalize_dbus_name(app_id: &str) -> String {
+    let app_id = app_id.to_string();
+    let app_id_splits = app_id.rsplit_once(".instance");
+
+    match app_id_splits {
+        Some((app_id, _)) => format!("{app_id}.instancen"),
+        None => app_id,
     }
 }
 
@@ -399,13 +436,16 @@ fn parse_and_send_metadata(app_id: &str, metadata: HashMap<String, zvariant::Own
         .cloned();
 
     let metadata_info = MetadataInfo {
-        app_id: app_id.to_owned(),
+        app_id: normalize_dbus_name(app_id),
         title: metadata.title().unwrap_or_default().to_string(),
         artist: first_artist.unwrap_or_default(),
         album: metadata.album_name().unwrap_or_default().to_string(),
         album_artist: first_album_artist.unwrap_or_default(),
         track_number: metadata.track_number().unwrap_or_default(),
-        duration: metadata.length().unwrap_or_default().as_millis() as i64,
+        duration: metadata
+            .length()
+            .map(|x| x.as_millis() as i64)
+            .unwrap_or(-1),
     };
 
     on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
@@ -420,7 +460,7 @@ fn parse_and_send_playback_state(
     let playback_status = PlaybackState::from_str(&playback_status).unwrap_or(PlaybackState::Other);
 
     let playback_info = PlaybackInfo {
-        app_id: app_id.to_owned(),
+        app_id: normalize_dbus_name(app_id),
         state: playback_status,
         position,
         can_skip: can_go_next,
@@ -430,5 +470,17 @@ fn parse_and_send_playback_state(
 }
 
 fn send_active_players(active_players: &[SessionInfo]) {
+    // replace .instance1234 at the end with .instancen
+
+    let active_players = active_players
+        .iter()
+        .map(|session_info| {
+            let app_id = normalize_dbus_name(&session_info.app_id);
+            let app_name = session_info.app_name.clone();
+
+            SessionInfo { app_id, app_name }
+        })
+        .collect::<HashSet<_>>();
+
     on_active_sessions_changed(serde_json::to_string(&active_players).unwrap());
 }

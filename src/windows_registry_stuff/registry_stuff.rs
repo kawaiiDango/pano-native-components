@@ -9,7 +9,7 @@ pub fn add_remove_startup(exe_path: &str, add: bool) -> Result<(), Box<dyn std::
     let key = CURRENT_USER.create(REG_PATH)?;
 
     if add {
-        key.set_string(REG_NAME, format!("\"{}\" -m", exe_path))?;
+        key.set_string(REG_NAME, format!("\"{exe_path}\" -m"))?;
     } else {
         key.remove_value(REG_NAME)?;
     }
@@ -23,7 +23,7 @@ pub fn is_added_to_startup(exe_path: &str) -> Result<bool, Box<dyn std::error::E
     let result = key.get_string(REG_NAME);
 
     let is_added = match result {
-        Ok(value) => value == format!("\"{}\" -m", exe_path),
+        Ok(value) => value == format!("\"{exe_path}\" -m"),
         Err(_) => false,
     };
 
@@ -31,7 +31,7 @@ pub fn is_added_to_startup(exe_path: &str) -> Result<bool, Box<dyn std::error::E
 }
 
 pub fn register_aumid_if_needed(icon_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let key_path = format!("Software\\Classes\\AppUserModelId\\{}", AUMID);
+    let key_path = format!("Software\\Classes\\AppUserModelId\\{AUMID}");
 
     let exists = CURRENT_USER.open(&key_path).is_ok();
 

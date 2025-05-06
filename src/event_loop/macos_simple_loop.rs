@@ -6,7 +6,7 @@ use crate::user_event::UserEvent;
 static USER_EVENT_SENDER: OnceLock<mpsc::Sender<UserEvent>> = OnceLock::new();
 
 pub fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) {
-    let (sender, mut receiver) = mpsc::channel::<UserEvent>(1);
+    let (sender, mut receiver) = mpsc::channel::<UserEvent>(100);
 
     USER_EVENT_SENDER.set(sender).unwrap();
 

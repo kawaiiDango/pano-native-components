@@ -3,3 +3,4 @@ Cargo.lock
 *.class
 *.h
 *.log
+.vscode

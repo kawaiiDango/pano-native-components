@@ -6,7 +6,7 @@ pub struct SessionInfo {
     pub app_name: String,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MetadataInfo {
     pub app_id: String,
     pub title: String,
@@ -30,6 +30,7 @@ pub struct TimelineInfo {
     pub app_id: String,
     pub duration: i64,
     pub position: i64,
+    pub last_updated: i64,
 }
 
 #[derive(Serialize, Debug, Clone)]

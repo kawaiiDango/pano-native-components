@@ -20,7 +20,7 @@ pub fn send_user_event(user_event: UserEvent) {
     if let Some(proxy) = USER_EVENT_SENDER.get() {
         match proxy.send_event(user_event) {
             Ok(_) => {}
-            Err(e) => eprintln!("Error sending message to event loop: {}", e),
+            Err(e) => eprintln!("Error sending message to event loop: {e}"),
         }
     } else {
         eprintln!("Event loop not running");
@@ -43,9 +43,9 @@ impl PanoTrayApplication {
     fn new_tray() -> TrayIcon {
         let icon = Icon::from_rgba(dummy_icon(64), 64, 64).unwrap();
         let menu = Menu::new();
-        let item1 = MenuItem::new("item1", true, None);
+        let item1 = MenuItem::new("Initializing Pano Scrobbler", true, None);
         if let Err(err) = menu.append(&item1) {
-            println!("{err:?}");
+            eprintln!("{err:?}");
         }
 
         TrayIconBuilder::new()
@@ -142,6 +142,6 @@ pub fn event_loop(jni_callback: impl FnMut(String, String) + 'static) {
     }));
 
     if let Err(e) = event_loop.run_app(&mut app) {
-        eprintln!("Error running event loop: {}", e);
+        eprintln!("Error running event loop: {e}");
     };
 }

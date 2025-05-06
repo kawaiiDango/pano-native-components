@@ -11,7 +11,9 @@ static USER_EVENT_SENDER: OnceLock<mpsc::Sender<UserEvent>> = OnceLock::new();
 pub fn send_user_event(user_event: UserEvent) {
     if let Some(sender) = USER_EVENT_SENDER.get() {
         // todo make it reliable by using async
-        sender.try_send(user_event).unwrap();
+        sender.try_send(user_event).unwrap_or_else(|_| {
+            eprintln!("Failed to send user event");
+        });
     } else {
         eprintln!("Event loop not running");
     }
@@ -33,13 +35,19 @@ impl ksni::Tray for PanoTray {
     const MENU_ON_ACTIVATE: bool = true;
 
     fn title(&self) -> String {
-        self.tooltip.clone()
+        "Pano Scrobbler".to_string()
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            title: "Pano Scrobbler".to_string(),
+            description: self.tooltip.clone(),
+            ..Default::default()
+        }
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-    
-        self
-            .menu_items
+        self.menu_items
             .iter()
             .map(|(id, text)| {
                 let id_owned = id.clone();
@@ -64,7 +72,7 @@ impl ksni::Tray for PanoTray {
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) {
-    let (sender, mut receiver) = mpsc::channel::<UserEvent>(1);
+    let (sender, mut receiver) = mpsc::channel::<UserEvent>(100);
     USER_EVENT_SENDER.set(sender).unwrap();
 
     let tray = PanoTray {
@@ -77,7 +85,7 @@ pub async fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) 
     let handle_res = tray.spawn().await;
 
     if let Err(e) = &handle_res {
-        eprintln!("Error creating tray: {}", e);
+        eprintln!("Error creating tray: {e}");
     }
 
     loop {
