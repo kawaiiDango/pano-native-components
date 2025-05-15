@@ -22,13 +22,13 @@ nix = { version = "0.30", default-features = false, features = ["fs"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
-    "Media",
     "Media_Control",
-    "Foundation",
     "Foundation_Collections",
     "ApplicationModel",
     "Win32_System_Threading",
     "Win32_Security",
+    "Win32_Graphics_Dwm",
+    "Win32_System_LibraryLoader",
 ] }
 windows-registry = "0.5"
 winit = { version = "0.30", default-features = false }

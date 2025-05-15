@@ -9,10 +9,10 @@ mod notifications;
 mod pano_tray;
 mod single_instance;
 mod user_event;
-mod windows_registry_stuff;
+mod windows_utils;
 
 use event_loop::send_user_event;
-use jni::sys::{jboolean, jint};
+use jni::sys::{jboolean, jint, jlong};
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString, ReleaseMode};
@@ -213,7 +213,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
 
     // convert the argb packed ints to argb bytes
 
-    let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
+    let mut icon_rgba = Vec::<u8>::with_capacity(len * 4);
 
     for &argb in argb_rust.iter() {
         let a = (argb >> 24) as u8;
@@ -221,10 +221,10 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
         let g = (argb >> 8) as u8;
         let b = argb as u8;
 
-        icon_argb.push(a);
-        icon_argb.push(r);
-        icon_argb.push(g);
-        icon_argb.push(b);
+        icon_rgba.push(r);
+        icon_rgba.push(g);
+        icon_rgba.push(b);
+        icon_rgba.push(a);
     }
 
     let icon_dim: u32 = icon_dim as u32;
@@ -246,7 +246,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
 
     send_user_event(UserEvent::UpdateTray(PanoTray {
         tooltip,
-        icon_argb,
+        icon_rgba,
         icon_dim,
         menu_items,
     }));
@@ -303,7 +303,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStart
         let exe_path: String = env.get_string(&exe_path).unwrap().into();
         let add = add != 0;
 
-        if let Err(e) = windows_registry_stuff::add_remove_startup(&exe_path, add) {
+        if let Err(e) = windows_utils::add_remove_startup(&exe_path, add) {
             eprintln!("Error adding/removing from startup: {e}");
             0
         } else {
@@ -327,7 +327,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
     {
         let exe_path: String = env.get_string(&exe_path).unwrap().into();
 
-        match windows_registry_stuff::is_added_to_startup(&exe_path) {
+        match windows_utils::is_added_to_startup(&exe_path) {
             Ok(is_added) => is_added as jboolean,
             Err(e) => {
                 eprintln!("Error checking if added to startup: {e}");
@@ -339,6 +339,18 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
     #[cfg(not(target_os = "windows"))]
     {
         0
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_applyDarkModeToWindow(
+    _env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+) {
+    #[cfg(target_os = "windows")]
+    {
+        windows_utils::apply_dark_mode_to_window(handle);
     }
 }
 

@@ -10,7 +10,7 @@ use winit::{
     platform::windows::EventLoopBuilderExtWindows,
 };
 
-use crate::{pano_tray::PanoTray, user_event::UserEvent};
+use crate::{pano_tray::PanoTray, user_event::UserEvent, windows_utils::allow_dark_mode_for_app};
 
 use super::dummy_icon;
 
@@ -41,6 +41,8 @@ impl PanoTrayApplication {
     }
 
     fn new_tray() -> TrayIcon {
+        allow_dark_mode_for_app(true);
+
         let icon = Icon::from_rgba(dummy_icon(64), 64, 64).unwrap();
         let menu = Menu::new();
         let item1 = MenuItem::new("Initializing Pano Scrobbler", true, None);
@@ -59,7 +61,7 @@ impl PanoTrayApplication {
     fn update_tray(&mut self, pano_tray: &PanoTray) {
         if let Some(tray_icon) = &mut self.tray_icon {
             let icon = Icon::from_rgba(
-                pano_tray.icon_argb.clone(),
+                pano_tray.icon_rgba.clone(),
                 pano_tray.icon_dim,
                 pano_tray.icon_dim,
             )

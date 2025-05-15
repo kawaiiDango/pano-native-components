@@ -3,13 +3,13 @@ use notify_rust::Notification;
 pub fn notify(title: &str, body: &str, icon_path: &str) {
     #[cfg(target_os = "windows")]
     {
-        use crate::windows_registry_stuff;
+        use crate::windows_utils;
         use std::sync::Once;
 
         static ONCE: Once = Once::new();
 
         ONCE.call_once(|| {
-            let result = windows_registry_stuff::register_aumid_if_needed(icon_path);
+            let result = windows_utils::register_aumid_if_needed(icon_path);
 
             if let Err(e) = result {
                 eprintln!("Error registering AUMID: {e}");
@@ -22,7 +22,7 @@ pub fn notify(title: &str, body: &str, icon_path: &str) {
     notification.summary(title).body(body).timeout(10000);
 
     #[cfg(target_os = "windows")]
-    notification.app_id(crate::windows_registry_stuff::AUMID);
+    notification.app_id(crate::windows_utils::AUMID);
 
     #[cfg(target_os = "linux")]
     notification.appname("pano-scrobbler").icon(icon_path);

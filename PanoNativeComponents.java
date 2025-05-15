@@ -36,12 +36,15 @@ public class PanoNativeComponents {
 
     static native boolean isSingleInstance(String name);
 
+    static native void applyDarkModeToWindow(long handle);
+
     static {
         System.loadLibrary("native_components");
     }
 
     public static void main(String[] args) {
         System.out.println(ping("🪼hello " + getMachineId()));
+        applyDarkModeToWindow(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
         boolean singleInstance = isSingleInstance("aaa");
         System.out.println("isSingleInstance: " + singleInstance);
