@@ -12,6 +12,14 @@ jni = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.45", features = ["rt", "sync", "macros", "time"] }
+wry = { version = "0.51.2", default-features = false, features = [
+    "os-webview",
+    "protocol",
+] }
+winit = { version = "0.30", default-features = false, features = [
+    "x11",
+    "rwh_06",
+] }
 # discord-presence = { version = "1.4", features = ["activity_type"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -19,6 +27,7 @@ zbus = { version = "5.6", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
 nix = { version = "0.30", default-features = false, features = ["fs"] }
+gtk = "0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
@@ -31,7 +40,6 @@ windows = { version = "0.61", features = [
     "Win32_System_LibraryLoader",
 ] }
 windows-registry = "0.5"
-winit = { version = "0.30", default-features = false }
 tray-icon = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]

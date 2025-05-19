@@ -38,6 +38,12 @@ public class PanoNativeComponents {
 
     static native void applyDarkModeToWindow(long handle);
 
+    static native void launchWebView(String url, String callbackPrefix);
+
+    static native void getWebViewCookiesFor(String url);
+
+    static native void quitWebView();
+
     static {
         System.loadLibrary("native_components");
     }
@@ -65,6 +71,8 @@ public class PanoNativeComponents {
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
+                    launchWebView("https://fonts.google.com", "callbackPrefix");
+
                     System.out.println("startListeningMedia");
                     startListeningMedia();
                     System.out.println("startListeningMedia finished");
@@ -106,6 +114,9 @@ public class PanoNativeComponents {
                             "org.mpris.MediaPlayer2.cider.instancen",
 
                 });
+
+                getWebViewCookiesFor("https://fonts.google.com");
+
                 try {
                     Thread.sleep(5000);
                 } catch (InterruptedException e) {
@@ -142,6 +153,14 @@ public class PanoNativeComponents {
 
     public void onTrayMenuItemClicked(String id) {
         System.out.println("onTrayMenuItemClicked: " + id);
+    }
+
+    public void onWebViewCookies(String cookies) {
+        System.out.println("onWebViewCookies: " + cookies);
+    }
+
+    public void onWebViewPageLoad(String url) {
+        System.out.println("onWebViewPageLoad: " + url);
     }
 
 }

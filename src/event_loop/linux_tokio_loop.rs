@@ -1,15 +1,19 @@
 use std::sync::OnceLock;
 
 use crate::{pano_tray::PanoTray, user_event::UserEvent};
+use gtk::glib::once_cell::sync::OnceCell;
 use ksni::{Icon, MenuItem, TrayMethods, menu::StandardItem};
 use tokio::sync::mpsc;
 
-use super::dummy_icon;
+use super::{
+    dummy_icon,
+    winit_loop::{self, send_user_event},
+};
 
-static USER_EVENT_SENDER: OnceLock<mpsc::Sender<UserEvent>> = OnceLock::new();
+static TOKIO_USER_EVENT_SENDER: OnceLock<mpsc::Sender<UserEvent>> = OnceLock::new();
 
-pub fn send_user_event(user_event: UserEvent) {
-    if let Some(sender) = USER_EVENT_SENDER.get() {
+pub fn send_tokio_user_event(user_event: UserEvent) {
+    if let Some(sender) = TOKIO_USER_EVENT_SENDER.get() {
         // todo make it reliable by using async
         sender.try_send(user_event).unwrap_or_else(|_| {
             eprintln!("Failed to send user event");
@@ -57,7 +61,7 @@ impl ksni::Tray for PanoTray {
                     _ => MenuItem::Standard(StandardItem {
                         label: text_owned,
                         activate: Box::new(move |_| {
-                            send_user_event(UserEvent::JniCallback(
+                            send_tokio_user_event(UserEvent::JniCallback(
                                 "onTrayMenuItemClicked".to_string(),
                                 id_owned.clone(),
                             ));
@@ -71,9 +75,9 @@ impl ksni::Tray for PanoTray {
 }
 
 #[tokio::main(flavor = "current_thread")]
-pub async fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) {
+pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'static) {
     let (sender, mut receiver) = mpsc::channel::<UserEvent>(100);
-    USER_EVENT_SENDER.set(sender).unwrap();
+    TOKIO_USER_EVENT_SENDER.set(sender).unwrap();
 
     let tray = PanoTray {
         tooltip: "Pano Scrobbler".to_string(),
@@ -83,6 +87,8 @@ pub async fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) 
     };
 
     let handle_res = tray.spawn().await;
+
+    let winit_thread_handle: OnceCell<std::thread::JoinHandle<()>> = OnceCell::new();
 
     if let Err(e) = &handle_res {
         eprintln!("Error creating tray: {e}");
@@ -109,6 +115,28 @@ pub async fn event_loop(mut jni_callback: impl FnMut(String, String) + 'static) 
                     handle.shutdown().await;
                 }
                 break;
+            }
+
+            Some(UserEvent::LaunchWebview(url, title)) => {
+                // if winit_thread_handle is Some, send a message to the existing winit loop
+                if winit_thread_handle.get().is_some() {
+                    send_user_event(UserEvent::LaunchWebview(url, title))
+                } else {
+                    // start winit loop in a new thread
+                    let _ = winit_thread_handle.set(std::thread::spawn(move || {
+                        winit_loop::event_loop(UserEvent::LaunchWebview(url, title));
+                    }));
+                }
+            }
+            Some(UserEvent::QuitWebview) => {
+                if winit_thread_handle.get().is_some() {
+                    send_user_event(UserEvent::QuitWebview);
+                }
+            }
+            Some(UserEvent::WebViewCookiesFor(url)) => {
+                if winit_thread_handle.get().is_some() {
+                    send_user_event(UserEvent::WebViewCookiesFor(url));
+                }
             }
         }
     }

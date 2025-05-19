@@ -4,5 +4,8 @@ use crate::pano_tray::PanoTray;
 pub enum UserEvent {
     UpdateTray(PanoTray),
     JniCallback(String, String),
+    LaunchWebview(String, String),
+    WebViewCookiesFor(String),
+    QuitWebview,
     ShutdownEventLoop,
 }

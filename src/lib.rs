@@ -9,6 +9,8 @@ mod notifications;
 mod pano_tray;
 mod single_instance;
 mod user_event;
+mod webview;
+mod webview_event;
 mod windows_utils;
 
 use event_loop::send_user_event;
@@ -211,9 +213,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
             .unwrap()
     };
 
-    // convert the argb packed ints to argb bytes
-
-    let mut icon_rgba = Vec::<u8>::with_capacity(len * 4);
+    let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
 
     for &argb in argb_rust.iter() {
         let a = (argb >> 24) as u8;
@@ -221,10 +221,10 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
         let g = (argb >> 8) as u8;
         let b = argb as u8;
 
-        icon_rgba.push(r);
-        icon_rgba.push(g);
-        icon_rgba.push(b);
-        icon_rgba.push(a);
+        icon_argb.push(a);
+        icon_argb.push(r);
+        icon_argb.push(b);
+        icon_argb.push(g);
     }
 
     let icon_dim: u32 = icon_dim as u32;
@@ -246,7 +246,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
 
     send_user_event(UserEvent::UpdateTray(PanoTray {
         tooltip,
-        icon_rgba,
+        icon_argb,
         icon_dim,
         menu_items,
     }));
@@ -343,15 +343,55 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStart
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_launchWebView(
+    mut env: JNIEnv,
+    _class: JClass,
+    url: JString,
+    callback_prefix: JString,
+) {
+    let url: String = env
+        .get_string(&url)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let callback_prefix: String = env
+        .get_string(&callback_prefix)
+        .expect("Couldn't get java string!")
+        .into();
+
+    send_user_event(UserEvent::LaunchWebview(url, callback_prefix));
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getWebViewCookiesFor(
+    mut env: JNIEnv,
+    _class: JClass,
+    url: JString,
+) {
+    let url: String = env
+        .get_string(&url)
+        .expect("Couldn't get java string!")
+        .into();
+
+    send_user_event(UserEvent::WebViewCookiesFor(url));
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_quitWebView(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    send_user_event(UserEvent::QuitWebview);
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_applyDarkModeToWindow(
     _env: JNIEnv,
     _class: JClass,
     handle: jlong,
 ) {
     #[cfg(target_os = "windows")]
-    {
-        windows_utils::apply_dark_mode_to_window(handle);
-    }
+    windows_utils::apply_dark_mode_to_window(handle);
 }
 
 // #[unsafe(no_mangle)]

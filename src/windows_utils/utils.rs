@@ -1,23 +1,20 @@
-use windows::Win32::Foundation::HMODULE;
+use windows::Win32::Foundation::{HMODULE, HWND};
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-use windows::Win32::{
-    Foundation::HWND,
-    Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute},
-};
 use windows::core::{PCSTR, s};
 
 use windows_registry::CURRENT_USER;
 
 const REG_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const REG_NAME: &str = "Pano Scrobbler";
-pub const AUMID: &str = "com.arn.scrobble.desktop.notifications";
+pub const AUMID: &str = "com.arn.scrobble";
 
 pub fn add_remove_startup(exe_path: &str, add: bool) -> Result<(), Box<dyn std::error::Error>> {
     // .open will throw an AccessDenied error on .set_string
     let key = CURRENT_USER.create(REG_PATH)?;
 
     if add {
-        key.set_string(REG_NAME, format!("\"{exe_path}\" -m"))?;
+        key.set_string(REG_NAME, format!("\"{exe_path}\" --minimized"))?;
     } else {
         key.remove_value(REG_NAME)?;
     }
@@ -52,7 +49,7 @@ pub fn register_aumid_if_needed(icon_path: &str) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-// taken from tauri
+// taken from tao
 pub fn allow_dark_mode_for_app(is_dark_mode: bool) {
     let huxtheme: isize = unsafe { LoadLibraryA(s!("uxtheme.dll")).unwrap_or_default().0 as _ };
 

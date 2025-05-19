@@ -2,6 +2,7 @@
 
 A JNI lib, used for accessing some native APIs on desktop, that are not possible with JVM.
 
+Linux needs additional dependencies listed at [tauri-apps/wry](https://github.com/tauri-apps/wry)
 
 cargo build --release
 
