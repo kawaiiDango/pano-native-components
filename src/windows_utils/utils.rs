@@ -3,51 +3,23 @@ use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowA
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 use windows::core::{PCSTR, s};
 
-use windows_registry::CURRENT_USER;
+// use windows_registry::CURRENT_USER;
 
-const REG_PATH: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const REG_NAME: &str = "Pano Scrobbler";
-pub const AUMID: &str = "com.arn.scrobble";
+// const REG_NAME: &str = "Pano Scrobbler";
 
-pub fn add_remove_startup(exe_path: &str, add: bool) -> Result<(), Box<dyn std::error::Error>> {
-    // .open will throw an AccessDenied error on .set_string
-    let key = CURRENT_USER.create(REG_PATH)?;
+// pub fn register_aumid_if_needed(aumid: &str, icon_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+//     let key_path = format!("Software\\Classes\\AppUserModelId\\{aumid}");
 
-    if add {
-        key.set_string(REG_NAME, format!("\"{exe_path}\" --minimized"))?;
-    } else {
-        key.remove_value(REG_NAME)?;
-    }
+//     let exists = CURRENT_USER.open(&key_path).is_ok();
 
-    Ok(())
-}
-
-pub fn is_added_to_startup(exe_path: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    let key = CURRENT_USER.open(REG_PATH)?;
-
-    let result = key.get_string(REG_NAME);
-
-    let is_added = match result {
-        Ok(value) => value == format!("\"{exe_path}\" -m"),
-        Err(_) => false,
-    };
-
-    Ok(is_added)
-}
-
-pub fn register_aumid_if_needed(icon_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let key_path = format!("Software\\Classes\\AppUserModelId\\{AUMID}");
-
-    let exists = CURRENT_USER.open(&key_path).is_ok();
-
-    if !exists {
-        let key = CURRENT_USER.create(&key_path)?;
-        key.set_expand_string("DisplayName", REG_NAME)?;
-        key.set_expand_string("IconUri", icon_path)?;
-        key.set_string("IconBackgroundColor", "0")?;
-    }
-    Ok(())
-}
+//     if !exists {
+//         let key = CURRENT_USER.create(&key_path)?;
+//         key.set_string("DisplayName", REG_NAME)?;
+//         key.set_string("IconUri", icon_path)?;
+//         key.set_string("IconBackgroundColor", "0")?;
+//     }
+//     Ok(())
+// }
 
 // taken from tao
 pub fn allow_dark_mode_for_app(is_dark_mode: bool) {

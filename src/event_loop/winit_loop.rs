@@ -1,12 +1,12 @@
-use std::sync::OnceLock;
+use std::{path::PathBuf, sync::OnceLock};
 use winit::{
     application::ApplicationHandler,
     event::{StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
-    window::{Window, WindowId},
+    window::{Window, WindowAttributes, WindowId},
 };
 use wry::{
-    Rect, WebView,
+    Rect, WebContext, WebView,
     dpi::{LogicalPosition, LogicalSize},
 };
 
@@ -36,7 +36,7 @@ struct PanoApplication {
     #[cfg(target_os = "windows")]
     jni_callback: Box<dyn FnMut(String, String)>,
     initial_event: Option<UserEvent>,
-    webview_window: Option<(Window, WebView)>,
+    webview_window: Option<(Window, WebView, WebContext)>,
 }
 
 impl PanoApplication {
@@ -71,7 +71,7 @@ impl PanoApplication {
 
         let icon = Icon::from_rgba(dummy_icon(64), 64, 64).unwrap();
         let menu = Menu::new();
-        let item1 = MenuItem::new("Initializing Pano Scrobbler", true, None);
+        let item1 = MenuItem::with_id("Dummy", "Initializing Pano Scrobbler", false, None);
         if let Err(err) = menu.append(&item1) {
             eprintln!("{err:?}");
         }
@@ -157,7 +157,7 @@ impl ApplicationHandler<UserEvent> for PanoApplication {
     ) {
         match event {
             WindowEvent::Resized(size) => {
-                let (window, webview) = self.webview_window.as_mut().unwrap();
+                let (window, webview, _context) = self.webview_window.as_mut().unwrap();
                 let size = size.to_logical::<u32>(window.scale_factor());
 
                 webview
@@ -189,37 +189,69 @@ impl ApplicationHandler<UserEvent> for PanoApplication {
 
             UserEvent::ShutdownEventLoop => {
                 self.quit_webview();
-                event_loop.exit();
+                // event_loop.exit();
             }
 
-            UserEvent::LaunchWebview(url, callback_prefix) => {
-                let window = event_loop
-                    .create_window(Window::default_attributes())
-                    .unwrap();
+            UserEvent::LaunchWebview(url, callback_prefix, data_dir) => {
+                let mut window_attributes = WindowAttributes::default()
+                    .with_inner_size(LogicalSize::new(640.0, 480.0))
+                    .with_title("WebView")
+                    .with_active(true);
 
-                let webview = crate::webview::create_webview(
-                    &window,
-                    url,
-                    callback_prefix,
-                    Box::new(|url| {
-                        let new_event =
-                            UserEvent::JniCallback("onWebViewPageLoad".to_string(), url);
+                #[cfg(target_os = "linux")]
+                {
+                    use winit::platform::x11::WindowAttributesExtX11;
+                    window_attributes = window_attributes.with_x11_class_name("pano-scrobbler");
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    use winit::platform::windows::WindowAttributesExtWindows;
+                    window_attributes = window_attributes.with_class_name("pano-scrobbler")
+                }
+
+                let window = event_loop.create_window(window_attributes);
+
+                match window {
+                    Err(e) => {
+                        eprintln!("Error creating window: {e}");
+                    }
+
+                    Ok(window) => {
+                        let mut context = WebContext::new(Some(PathBuf::from(data_dir)));
+
+                        let webview = crate::webview::create_webview(
+                            &window,
+                            &mut context,
+                            url,
+                            callback_prefix,
+                            Box::new(|url| {
+                                let new_event =
+                                    UserEvent::JniCallback("onWebViewPageLoad".to_string(), url);
+
+                                #[cfg(target_os = "windows")]
+                                send_user_event(new_event);
+
+                                #[cfg(target_os = "linux")]
+                                crate::event_loop::linux_tokio_loop::send_tokio_user_event(
+                                    new_event,
+                                );
+                            }),
+                        );
 
                         #[cfg(target_os = "windows")]
-                        send_user_event(new_event);
+                        {
+                            // does not work properly on linux
+                            window.focus_window();
+                        }
 
-                        #[cfg(target_os = "linux")]
-                        crate::event_loop::linux_tokio_loop::send_tokio_user_event(new_event);
-                    }),
-                );
-
-                window.set_title("WebView");
-                window.focus_window();
-                self.webview_window = Some((window, webview));
+                        self.webview_window = Some((window, webview, context));
+                    }
+                }
             }
 
             UserEvent::WebViewCookiesFor(url) => {
-                if let Some((_, webview)) = &self.webview_window {
+                if let Some((_, webview, _)) = &self.webview_window {
                     let webview_event = get_cookies_for_url(webview, url);
                     let new_event = UserEvent::JniCallback(
                         "onWebViewCookies".to_string(),

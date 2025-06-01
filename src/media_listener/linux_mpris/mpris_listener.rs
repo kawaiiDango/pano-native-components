@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
-    sync::OnceLock,
     time::Duration,
 };
 
@@ -38,8 +37,6 @@ struct PlayerListenerHandle {
     incoming_player_event_tx: Sender<IncomingPlayerEvent>,
 }
 
-static CONNECTION: OnceLock<Connection> = OnceLock::new();
-
 async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
     let media_player2_proxy = match MediaPlayer2Proxy::new(connection, dbus_name).await {
         Ok(proxy) => proxy,
@@ -63,12 +60,9 @@ pub async fn listener() -> zbus::Result<()> {
         RwLock::new(HashMap::new());
     let session_infos: RwLock<HashSet<SessionInfo>> = RwLock::new(HashSet::new());
 
-    if CONNECTION.get().is_none() {
-        let connection = Connection::session().await?;
-        CONNECTION.get_or_init(|| connection);
-    }
+    let connection = Connection::session().await?;
 
-    let dbus_proxy = DBusProxy::new(CONNECTION.get().unwrap()).await?;
+    let dbus_proxy = DBusProxy::new(&connection).await?;
 
     // listener just started, poll existing values
 
@@ -86,12 +80,16 @@ pub async fn listener() -> zbus::Result<()> {
         {
             let session_info = SessionInfo {
                 app_id: dbus_name.to_string(),
-                app_name: get_identity(CONNECTION.get().unwrap(), &dbus_name).await,
+                app_name: get_identity(&connection, &dbus_name).await,
             };
             session_infos.write().await.insert(session_info);
 
             if is_app_allowed(&normalize_dbus_name(&dbus_name)) {
-                start_tracking_player(dbus_name.to_string(), &mut names_to_handles.write().await);
+                start_tracking_player(
+                    &connection,
+                    dbus_name.to_string(),
+                    &mut names_to_handles.write().await,
+                );
             }
         }
     }
@@ -149,6 +147,7 @@ pub async fn listener() -> zbus::Result<()> {
 
                             if is_allowed && !is_tracking {
                                 start_tracking_player(
+                                    &connection,
                                     session_info.app_id.to_string(),
                                     &mut names_to_handles.write().await,
                                 );
@@ -196,12 +195,13 @@ pub async fn listener() -> zbus::Result<()> {
                 {
                     let session_info = SessionInfo {
                         app_id: dbus_name.to_string(),
-                        app_name: get_identity(CONNECTION.get().unwrap(), dbus_name).await,
+                        app_name: get_identity(&connection, dbus_name).await,
                     };
                     session_infos.write().await.insert(session_info);
 
                     if is_app_allowed(&normalize_dbus_name(dbus_name)) {
                         start_tracking_player(
+                            &connection,
                             dbus_name.to_string(),
                             &mut names_to_handles.write().await,
                         );
@@ -235,11 +235,11 @@ pub async fn listener() -> zbus::Result<()> {
 }
 
 async fn player_listeners(
-    connection: &Connection,
+    connection: Connection,
     app_id: String,
     mut incoming_player_event_rx: Receiver<IncomingPlayerEvent>,
 ) -> zbus::Result<()> {
-    let player_proxy = PlayerProxy::builder(connection)
+    let player_proxy = PlayerProxy::builder(&connection)
         .uncached_properties(&["Position"])
         .destination(app_id.clone())?
         .build()
@@ -384,16 +384,13 @@ async fn player_listeners(
 }
 
 fn start_tracking_player(
+    connection: &Connection,
     app_id: String,
     names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
 ) {
     let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
 
-    let join_handle = tokio::spawn(player_listeners(
-        CONNECTION.get().unwrap(),
-        app_id.clone(),
-        rx,
-    ));
+    let join_handle = tokio::spawn(player_listeners(connection.clone(), app_id.clone(), rx));
 
     names_to_handles.insert(
         app_id,

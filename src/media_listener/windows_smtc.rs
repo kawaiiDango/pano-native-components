@@ -150,13 +150,12 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
         } else {
             let app_info = AppInfo::GetFromAppUserModelId(&app_id_hstring);
             let mut app_name = "".to_string();
-            if let Ok(app_info) = app_info {
-                if let Ok(display_info) = app_info.DisplayInfo() {
-                    if let Ok(display_name) = display_info.DisplayName() {
-                        app_name = display_name.to_string();
-                        app_names_cache.insert(app_id.clone(), app_name.clone());
-                    }
-                }
+            if let Ok(app_info) = app_info
+                && let Ok(display_info) = app_info.DisplayInfo()
+                && let Ok(display_name) = display_info.DisplayName()
+            {
+                app_name = display_name.to_string();
+                app_names_cache.insert(app_id.clone(), app_name.clone());
             }
 
             app_name
@@ -445,17 +444,17 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
         if duration != -1 {
             let mut cache = METADATA_INFO_CACHE.lock().unwrap();
             let existing_metadata_info = cache.get(&app_id);
-            if let Some(existing_metadata_info) = existing_metadata_info {
-                if existing_metadata_info.duration != duration {
-                    let mut metadata_info = existing_metadata_info.clone();
-                    metadata_info.duration = duration;
+            if let Some(existing_metadata_info) = existing_metadata_info
+                && existing_metadata_info.duration != duration
+            {
+                let mut metadata_info = existing_metadata_info.clone();
+                metadata_info.duration = duration;
 
-                    // update the cache
-                    cache.insert(app_id.clone(), metadata_info.clone());
+                // update the cache
+                cache.insert(app_id.clone(), metadata_info.clone());
 
-                    // report the updated metadata
-                    on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
-                }
+                // report the updated metadata
+                on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
             }
         }
 

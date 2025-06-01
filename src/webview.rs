@@ -1,12 +1,13 @@
 use std::rc::Rc;
 
 use winit::window::Window;
-use wry::{PageLoadEvent, WebView, WebViewBuilder};
+use wry::{PageLoadEvent, WebContext, WebView, WebViewBuilder};
 
 use crate::webview_event::WebViewEvent;
 
 pub fn create_webview(
     window: &Window,
+    context: &mut WebContext,
     url: String,
     callback_prefix: String,
     on_page_load: Box<dyn Fn(String)>,
@@ -14,7 +15,8 @@ pub fn create_webview(
     let on_page_load1 = Rc::new(on_page_load);
     let on_page_load2 = on_page_load1.clone();
 
-    WebViewBuilder::new()
+    WebViewBuilder::with_web_context(context)
+        // WebViewBuilder::new()
         .with_url(&url)
         .with_navigation_handler(move |url| {
             let is_callback = url.starts_with(&callback_prefix);

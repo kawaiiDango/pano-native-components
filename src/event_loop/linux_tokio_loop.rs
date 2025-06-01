@@ -66,6 +66,7 @@ impl ksni::Tray for PanoTray {
                                 id_owned.clone(),
                             ));
                         }),
+                        enabled: id != "Dummy",
                         ..Default::default()
                     }),
                 }
@@ -83,7 +84,10 @@ pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'st
         tooltip: "Pano Scrobbler".to_string(),
         icon_argb: dummy_icon(64),
         icon_dim: 64,
-        menu_items: vec![],
+        menu_items: vec![(
+            "Dummy".to_string(),
+            "Initializing Pano Scrobbler".to_string(),
+        )],
     };
 
     let handle_res = tray.spawn().await;
@@ -117,14 +121,18 @@ pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'st
                 break;
             }
 
-            Some(UserEvent::LaunchWebview(url, title)) => {
+            Some(UserEvent::LaunchWebview(url, callback_prefix, data_dir)) => {
                 // if winit_thread_handle is Some, send a message to the existing winit loop
                 if winit_thread_handle.get().is_some() {
-                    send_user_event(UserEvent::LaunchWebview(url, title))
+                    send_user_event(UserEvent::LaunchWebview(url, callback_prefix, data_dir))
                 } else {
                     // start winit loop in a new thread
                     let _ = winit_thread_handle.set(std::thread::spawn(move || {
-                        winit_loop::event_loop(UserEvent::LaunchWebview(url, title));
+                        winit_loop::event_loop(UserEvent::LaunchWebview(
+                            url,
+                            callback_prefix,
+                            data_dir,
+                        ));
                     }));
                 }
             }

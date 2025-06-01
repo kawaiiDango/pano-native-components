@@ -30,22 +30,18 @@ public class PanoNativeComponents {
 
     static native String getMachineId();
 
-    static native boolean addRemoveStartupWin(String exePath, boolean add);
-
-    static native boolean isAddedToStartupWin(String exePath);
-
     static native boolean isSingleInstance(String name);
 
     static native void applyDarkModeToWindow(long handle);
 
-    static native void launchWebView(String url, String callbackPrefix);
+    static native void launchWebView(String url, String callbackPrefix, String dataDir);
 
     static native void getWebViewCookiesFor(String url);
 
     static native void quitWebView();
 
     static {
-        System.loadLibrary("native_components");
+        System.loadLibrary("pano_native_components");
     }
 
     public static void main(String[] args) {
@@ -71,7 +67,7 @@ public class PanoNativeComponents {
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
-                    launchWebView("https://fonts.google.com", "callbackPrefix");
+                    launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview");
 
                     System.out.println("startListeningMedia");
                     startListeningMedia();
@@ -96,7 +92,7 @@ public class PanoNativeComponents {
                 int size = 8;
                 int[] argb = new int[size * size];
                 for (int i = 0; i < argb.length; i++) {
-                    argb[i] = 0xffff0000;
+                    argb[i] = 0xffbebebe;
                 }
                 setTray("tooltip", argb, size, menuItemIds, menuItemTexts);
 
@@ -136,7 +132,7 @@ public class PanoNativeComponents {
     }
 
     public void onLogWarn(String msg) {
-        System.out.println("warn: " + msg);
+        System.err.println("warn: " + msg);
     }
 
     public void onActiveSessionsChanged(String json) {

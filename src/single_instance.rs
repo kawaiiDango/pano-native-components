@@ -44,6 +44,9 @@ mod inner {
         handle: Option<HANDLE>,
     }
 
+    unsafe impl Send for SingleInstance {}
+    unsafe impl Sync for SingleInstance {}
+
     impl SingleInstance {
         /// Returns a new SingleInstance object.
         pub fn new(name: &str) -> Result<Self, SingleInstanceError> {
@@ -94,60 +97,51 @@ mod inner {
 
 #[cfg(target_os = "linux")]
 mod inner {
+    use nix::sys::socket::{self, UnixAddr};
+    use std::os::fd::{AsRawFd, OwnedFd};
+
     use super::SingleInstanceError;
-    use nix::fcntl::{Flock, FlockArg};
-    use std::fs::{File, OpenOptions};
 
     /// A struct representing one running instance.
     pub struct SingleInstance {
-        maybe_flock: Option<Flock<File>>,
+        maybe_sock: Option<OwnedFd>,
     }
 
     impl SingleInstance {
         /// Returns a new SingleInstance object.
         pub fn new(name: &str) -> Result<Self, SingleInstanceError> {
-            // Place your lock file in the system temp directory
-            let mut lock_path = std::env::temp_dir();
-            lock_path.push(name);
+            let addr =
+                UnixAddr::new_abstract(name.as_bytes()).map_err(|_| SingleInstanceError::Nul)?;
+            let sock = socket::socket(
+                socket::AddressFamily::Unix,
+                socket::SockType::Stream,
+                // If we fork and exec, then make sure the child process doesn't
+                // hang on to this file descriptor.
+                socket::SockFlag::SOCK_CLOEXEC,
+                None,
+            )
+            .map_err(|_| SingleInstanceError::Nul)?;
 
-            // Open (or create) the lock file
-            let file = OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&lock_path);
+            let maybe_sock = match socket::bind(sock.as_raw_fd(), &addr) {
+                Ok(()) => Some(sock),
+                Err(e) => {
+                    eprintln!("Error binding socket: {e}");
+                    return Err(SingleInstanceError::MutexError);
+                }
+            };
 
-            match file {
-                Ok(file) => {
-                    // Try to acquire an exclusive non‐blocking lock
-                    match Flock::lock(file, FlockArg::LockExclusiveNonblock) {
-                        Ok(f) => Ok(Self {
-                            maybe_flock: Some(f),
-                        }), // Lock acquired => no other instance
-                        Err((_f, err_no)) => {
-                            eprintln!("Error acquiring lock: {err_no}");
-                            Err(SingleInstanceError::MutexError)
-                        }
-                    }
-                }
-                Err(_e) => {
-                    // Handle the error (e.g., file not found, permission denied, etc.)
-                    eprintln!("Error opening lock file");
-                    Err(SingleInstanceError::Nul)
-                }
-            }
+            Ok(Self { maybe_sock })
         }
 
         /// Returns whether this instance is single.
         pub fn is_single(&self) -> bool {
-            self.maybe_flock.is_some()
+            self.maybe_sock.is_some()
         }
     }
 
     impl Drop for SingleInstance {
         fn drop(&mut self) {
-            // File will be closed automatically, releasing the lock
-            self.maybe_flock = None;
+            self.maybe_sock.take();
         }
     }
 }

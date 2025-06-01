@@ -28,12 +28,14 @@ use user_event::UserEvent;
 
 use std::collections::HashSet;
 use std::env;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, OnceLock};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
+
+static INSTANCE_HANDLE: OnceLock<SingleInstance> = OnceLock::new();
 
 // This `#[no_mangle]` keeps rust from "mangling" the name and making it unique
 // for this crate. The name follow a strict naming convention so that the
@@ -277,7 +279,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isSingleInstan
     match instance {
         Ok(instance) => {
             if instance.is_single() {
-                Box::leak(Box::new(instance));
+                let _ = INSTANCE_HANDLE.set(instance);
                 1
             } else {
                 drop(instance);
@@ -292,62 +294,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isSingleInstan
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_addRemoveStartupWin(
-    mut env: JNIEnv,
-    _class: JClass,
-    exe_path: JString,
-    add: jboolean,
-) -> jboolean {
-    #[cfg(target_os = "windows")]
-    {
-        let exe_path: String = env.get_string(&exe_path).unwrap().into();
-        let add = add != 0;
-
-        if let Err(e) = windows_utils::add_remove_startup(&exe_path, add) {
-            eprintln!("Error adding/removing from startup: {e}");
-            0
-        } else {
-            1
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        0
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isAddedToStartupWin(
-    mut env: JNIEnv,
-    _class: JClass,
-    exe_path: JString,
-) -> jboolean {
-    #[cfg(target_os = "windows")]
-    {
-        let exe_path: String = env.get_string(&exe_path).unwrap().into();
-
-        match windows_utils::is_added_to_startup(&exe_path) {
-            Ok(is_added) => is_added as jboolean,
-            Err(e) => {
-                eprintln!("Error checking if added to startup: {e}");
-                0
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        0
-    }
-}
-
-#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_launchWebView(
     mut env: JNIEnv,
     _class: JClass,
     url: JString,
     callback_prefix: JString,
+    data_dir: JString,
 ) {
     let url: String = env
         .get_string(&url)
@@ -359,7 +311,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_launchWebView(
         .expect("Couldn't get java string!")
         .into();
 
-    send_user_event(UserEvent::LaunchWebview(url, callback_prefix));
+    let data_dir: String = env
+        .get_string(&data_dir)
+        .expect("Couldn't get java string!")
+        .into();
+
+    send_user_event(UserEvent::LaunchWebview(url, callback_prefix, data_dir));
 }
 
 #[unsafe(no_mangle)]

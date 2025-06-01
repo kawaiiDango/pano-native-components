@@ -2,31 +2,42 @@
 
 A JNI lib, used for accessing some native APIs on desktop, that are not possible with JVM.
 
-Linux needs additional dependencies listed at [tauri-apps/wry](https://github.com/tauri-apps/wry)
 
+To build:
+
+```
 cargo build --release
+```
 
-
+Linux needs additional dependencies listed at [tauri-apps/wry](https://github.com/tauri-apps/wry)
 
 To test: 
 
+```
 javac -h . PanoNativeComponents.java
 
 cargo build --release && javac -d . PanoNativeComponents.java && java -Djava.library.path=target/release/ com.arn.scrobble.PanoNativeComponents
+```
 
-or (if powershell)
+or (if Powershell)
 
+```
 cargo build --release && javac -d . PanoNativeComponents.java && java "-Djava.library.path=target/release/" com.arn.scrobble.PanoNativeComponents
-
+```
 
 To package:
 
-cp target/release/native_components.dll pano-scrobbler-dir/composeApp/resources/windows-x64/
-cp target/release/libnative_components.so pano-scrobbler-dir/composeApp/resources/linux-x64/
+```
+cp target/release/pano_native_components.dll pano-scrobbler-dir/composeApp/resources/windows-x64/
+```
+
+```
+cp target/release/libpano_native_components.so pano-scrobbler-dir/composeApp/resources/linux-x64/
+```
 
 
 
-Projects I used as a reference:
+I used code from these projects as a reference:
 
 https://github.com/Mange/mpris-rs
 

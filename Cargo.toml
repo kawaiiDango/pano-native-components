@@ -1,5 +1,5 @@
 [package]
-name = "native-components"
+name = "pano-native-components"
 version = "0.1.0"
 edition = "2024"
 
@@ -23,7 +23,7 @@ winit = { version = "0.30", default-features = false, features = [
 # discord-presence = { version = "1.4", features = ["activity_type"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.6", default-features = false, features = ["async-io"] }
+zbus = { version = "5.7", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
 nix = { version = "0.30", default-features = false, features = ["fs"] }
