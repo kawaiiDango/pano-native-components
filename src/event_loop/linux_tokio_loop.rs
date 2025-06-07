@@ -1,7 +1,6 @@
-use std::sync::OnceLock;
+use std::{cell::OnceCell, sync::OnceLock};
 
 use crate::{pano_tray::PanoTray, user_event::UserEvent};
-use gtk::glib::once_cell::sync::OnceCell;
 use ksni::{Icon, MenuItem, TrayMethods, menu::StandardItem};
 use tokio::sync::mpsc;
 
@@ -76,7 +75,7 @@ impl ksni::Tray for PanoTray {
 }
 
 #[tokio::main(flavor = "current_thread")]
-pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'static) {
+pub async fn tokio_event_loop(jni_callback: impl Fn(String, String) + 'static) {
     let (sender, mut receiver) = mpsc::channel::<UserEvent>(100);
     TOKIO_USER_EVENT_SENDER.set(sender).unwrap();
 
@@ -98,13 +97,13 @@ pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'st
         eprintln!("Error creating tray: {e}");
     }
 
-    loop {
-        match receiver.recv().await {
-            Some(UserEvent::JniCallback(fn_name, str_arg)) => {
+    while let Some(event) = receiver.recv().await {
+        match event {
+            UserEvent::JniCallback(fn_name, str_arg) => {
                 jni_callback(fn_name, str_arg);
             }
 
-            Some(UserEvent::UpdateTray(new_tray)) => {
+            UserEvent::UpdateTray(new_tray) => {
                 if let Ok(handle) = &handle_res {
                     handle
                         .update(|existing_tray| {
@@ -114,14 +113,7 @@ pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'st
                 }
             }
 
-            None | Some(UserEvent::ShutdownEventLoop) => {
-                if let Ok(handle) = &handle_res {
-                    handle.shutdown().await;
-                }
-                break;
-            }
-
-            Some(UserEvent::LaunchWebview(url, callback_prefix, data_dir)) => {
+            UserEvent::LaunchWebview(url, callback_prefix, data_dir) => {
                 // if winit_thread_handle is Some, send a message to the existing winit loop
                 if winit_thread_handle.get().is_some() {
                     send_user_event(UserEvent::LaunchWebview(url, callback_prefix, data_dir))
@@ -136,16 +128,20 @@ pub async fn tokio_event_loop(mut jni_callback: impl FnMut(String, String) + 'st
                     }));
                 }
             }
-            Some(UserEvent::QuitWebview) => {
+            UserEvent::QuitWebview => {
                 if winit_thread_handle.get().is_some() {
                     send_user_event(UserEvent::QuitWebview);
                 }
             }
-            Some(UserEvent::WebViewCookiesFor(url)) => {
+            UserEvent::WebViewCookiesFor(url) => {
                 if winit_thread_handle.get().is_some() {
                     send_user_event(UserEvent::WebViewCookiesFor(url));
                 }
             }
         }
+    }
+
+    if let Ok(handle) = &handle_res {
+        handle.shutdown().await;
     }
 }

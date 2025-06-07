@@ -8,9 +8,7 @@ public class PanoNativeComponents {
 
     private static native void startListeningMedia();
 
-    private static native void startEventLoop(PanoNativeComponents callback);
-
-    private static native void stopEventLoop();
+    private static native void startEventLoop();
 
     static native void setEnvironmentVariable(String key, String value);
 
@@ -30,8 +28,6 @@ public class PanoNativeComponents {
 
     static native String getMachineId();
 
-    static native boolean isSingleInstance(String name);
-
     static native void applyDarkModeToWindow(long handle);
 
     static native void launchWebView(String url, String callbackPrefix, String dataDir);
@@ -39,6 +35,8 @@ public class PanoNativeComponents {
     static native void getWebViewCookiesFor(String url);
 
     static native void quitWebView();
+
+    static native boolean sendIpcCommand(String command, String arg);
 
     static {
         System.loadLibrary("pano_native_components");
@@ -48,13 +46,13 @@ public class PanoNativeComponents {
         System.out.println(ping("🪼hello " + getMachineId()));
         applyDarkModeToWindow(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
-        boolean singleInstance = isSingleInstance("aaa");
-        System.out.println("isSingleInstance: " + singleInstance);
+
+        sendIpcCommand("testCommand", "testArg");
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                startEventLoop(new PanoNativeComponents());
+                startEventLoop();
             }
         }).start();
 
@@ -67,7 +65,7 @@ public class PanoNativeComponents {
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
-                    launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview");
+                    // launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview");
 
                     System.out.println("startListeningMedia");
                     startListeningMedia();
@@ -127,36 +125,40 @@ public class PanoNativeComponents {
 
     }
 
-    public void onLogInfo(String msg) {
+    public static void onLogInfo(String msg) {
         System.out.println("info: " + msg);
     }
 
-    public void onLogWarn(String msg) {
+    public static void onLogWarn(String msg) {
         System.err.println("warn: " + msg);
     }
 
-    public void onActiveSessionsChanged(String json) {
+    public static void onActiveSessionsChanged(String json) {
         System.out.println("onActiveSessionsChanged: " + json);
     }
 
-    public void onMetadataChanged(String json) {
+    public static void onMetadataChanged(String json) {
         System.out.println("onMetadataChanged: " + json);
     }
 
-    public void onPlaybackStateChanged(String json) {
+    public static void onPlaybackStateChanged(String json) {
         System.out.println("onPlaybackStateChanged: " + json);
     }
 
-    public void onTrayMenuItemClicked(String id) {
+    public static void onTrayMenuItemClicked(String id) {
         System.out.println("onTrayMenuItemClicked: " + id);
     }
 
-    public void onWebViewCookies(String cookies) {
+    public static void onWebViewCookies(String cookies) {
         System.out.println("onWebViewCookies: " + cookies);
     }
 
-    public void onWebViewPageLoad(String url) {
+    public static void onWebViewPageLoad(String url) {
         System.out.println("onWebViewPageLoad: " + url);
+    }
+
+    public static void onReceiveIpcCommand(String command, String arg) {
+        System.out.println("onReceiveIpcCommand: " + command + " " + arg);
     }
 
 }

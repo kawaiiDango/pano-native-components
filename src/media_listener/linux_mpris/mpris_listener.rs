@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use futures_util::stream::StreamExt;
+use futures_util::{TryFutureExt, stream::StreamExt};
 use tokio::{
     sync::{
         RwLock, RwLockWriteGuard,
@@ -20,7 +20,7 @@ use zbus::{
 };
 
 use crate::{
-    INCOMING_PLAYER_EVENT_TX, is_app_allowed,
+    INCOMING_PLAYER_EVENT_TX, ipc, is_app_allowed,
     media_info_structs::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
     on_metadata_changed, on_playback_state_changed,
@@ -52,7 +52,9 @@ async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
 }
 
 #[tokio::main(flavor = "current_thread")]
-pub async fn listener() -> zbus::Result<()> {
+pub async fn listener(
+    jni_callback: impl Fn(String, String, String) + 'static,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (all_players_tx, mut all_players_rx) = mpsc::channel(100);
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(all_players_tx);
 
@@ -105,130 +107,135 @@ pub async fn listener() -> zbus::Result<()> {
     // listen for new players
     let mut name_owner_changed = dbus_proxy.receive_name_owner_changed().await?;
 
-    tokio::try_join!(
-        async {
-            while let Some(incoming_event) = all_players_rx.recv().await {
-                match &incoming_event {
-                    IncomingPlayerEvent::Skip(app_id) => {
-                        let names_to_handles = names_to_handles.read().await;
-                        let handle = names_to_handles.get(app_id);
+    let incoming_events = async {
+        while let Some(incoming_event) = all_players_rx.recv().await {
+            match &incoming_event {
+                IncomingPlayerEvent::Skip(app_id) => {
+                    let names_to_handles = names_to_handles.read().await;
+                    let handle = names_to_handles.get(app_id);
 
-                        if let Some(handle) = handle {
-                            let _ = handle.incoming_player_event_tx.send(incoming_event).await;
-                        }
+                    if let Some(handle) = handle {
+                        let _ = handle.incoming_player_event_tx.send(incoming_event).await;
                     }
+                }
 
-                    IncomingPlayerEvent::Mute(app_id) => {
-                        let names_to_handles = names_to_handles.read().await;
-                        let handle = names_to_handles.get(app_id);
+                IncomingPlayerEvent::Mute(app_id) => {
+                    let names_to_handles = names_to_handles.read().await;
+                    let handle = names_to_handles.get(app_id);
 
-                        if let Some(handle) = handle {
-                            let _ = handle.incoming_player_event_tx.send(incoming_event).await;
-                        }
+                    if let Some(handle) = handle {
+                        let _ = handle.incoming_player_event_tx.send(incoming_event).await;
                     }
+                }
 
-                    IncomingPlayerEvent::Unmute(app_id) => {
-                        let names_to_handles = names_to_handles.read().await;
-                        let handle = names_to_handles.get(app_id);
+                IncomingPlayerEvent::Unmute(app_id) => {
+                    let names_to_handles = names_to_handles.read().await;
+                    let handle = names_to_handles.get(app_id);
 
-                        if let Some(handle) = handle {
-                            let _ = handle.incoming_player_event_tx.send(incoming_event).await;
-                        }
+                    if let Some(handle) = handle {
+                        let _ = handle.incoming_player_event_tx.send(incoming_event).await;
                     }
+                }
 
-                    IncomingPlayerEvent::RefreshSessions => {
-                        for session_info in session_infos.read().await.iter() {
-                            let app_id_normalized = normalize_dbus_name(&session_info.app_id);
-                            let is_allowed = is_app_allowed(&app_id_normalized);
-                            let is_tracking = names_to_handles
-                                .read()
-                                .await
-                                .contains_key(&app_id_normalized);
+                IncomingPlayerEvent::RefreshSessions => {
+                    for session_info in session_infos.read().await.iter() {
+                        let app_id_normalized = normalize_dbus_name(&session_info.app_id);
+                        let is_allowed = is_app_allowed(&app_id_normalized);
+                        let is_tracking = names_to_handles
+                            .read()
+                            .await
+                            .contains_key(&app_id_normalized);
 
-                            if is_allowed && !is_tracking {
-                                start_tracking_player(
-                                    &connection,
-                                    session_info.app_id.to_string(),
-                                    &mut names_to_handles.write().await,
-                                );
-                            }
-
-                            if !is_allowed && is_tracking {
-                                stop_tracking_player(
-                                    names_to_handles.write().await.remove(&session_info.app_id),
-                                );
-                            }
-                        }
-                    }
-
-                    IncomingPlayerEvent::Shutdown => {
-                        for (_app_id, handle) in names_to_handles.write().await.drain() {
-                            stop_tracking_player(Some(handle));
+                        if is_allowed && !is_tracking {
+                            start_tracking_player(
+                                &connection,
+                                session_info.app_id.to_string(),
+                                &mut names_to_handles.write().await,
+                            );
                         }
 
-                        session_infos.write().await.clear();
-
-                        // produce some error to stop the tasks
-                        return zbus::Result::Err(zbus::Error::Unsupported);
+                        if !is_allowed && is_tracking {
+                            stop_tracking_player(
+                                names_to_handles.write().await.remove(&session_info.app_id),
+                            );
+                        }
                     }
+                }
+
+                IncomingPlayerEvent::Shutdown => {
+                    for (_app_id, handle) in names_to_handles.write().await.drain() {
+                        stop_tracking_player(Some(handle));
+                    }
+
+                    session_infos.write().await.clear();
+
+                    // produce some error to stop the tasks
+                    return zbus::Result::Err(zbus::Error::Unsupported);
                 }
             }
-
-            zbus::Result::Ok(())
-        },
-        async {
-            while let Some(name_owner_changed) = name_owner_changed.next().await {
-                let name_owner_changed: NameOwnerChangedArgs = name_owner_changed.args()?;
-                let dbus_name: &str = name_owner_changed.name();
-
-                if !dbus_name.starts_with(MPRIS2_PREFIX) {
-                    continue;
-                }
-
-                let old_owner = name_owner_changed.old_owner();
-                let new_owner = name_owner_changed.new_owner();
-
-                // handle player added
-                if old_owner.is_none()
-                    && new_owner.is_some()
-                    && !names_to_handles.read().await.contains_key(dbus_name)
-                {
-                    let session_info = SessionInfo {
-                        app_id: dbus_name.to_string(),
-                        app_name: get_identity(&connection, dbus_name).await,
-                    };
-                    session_infos.write().await.insert(session_info);
-
-                    if is_app_allowed(&normalize_dbus_name(dbus_name)) {
-                        start_tracking_player(
-                            &connection,
-                            dbus_name.to_string(),
-                            &mut names_to_handles.write().await,
-                        );
-                    }
-                }
-
-                // handle player removed
-                if old_owner.is_some() && new_owner.is_none() {
-                    stop_tracking_player(names_to_handles.write().await.remove(dbus_name));
-
-                    // remove the entry from session_infos
-                    session_infos
-                        .write()
-                        .await
-                        .retain(|session_info| session_info.app_id != dbus_name);
-                }
-
-                let active_players = session_infos
-                    .read()
-                    .await
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                send_active_players(&active_players);
-            }
-            zbus::Result::Ok(())
         }
+
+        Ok(())
+    };
+    let mpris_events = async {
+        while let Some(name_owner_changed) = name_owner_changed.next().await {
+            let name_owner_changed: NameOwnerChangedArgs = name_owner_changed.args()?;
+            let dbus_name: &str = name_owner_changed.name();
+
+            if !dbus_name.starts_with(MPRIS2_PREFIX) {
+                continue;
+            }
+
+            let old_owner = name_owner_changed.old_owner();
+            let new_owner = name_owner_changed.new_owner();
+
+            // handle player added
+            if old_owner.is_none()
+                && new_owner.is_some()
+                && !names_to_handles.read().await.contains_key(dbus_name)
+            {
+                let session_info = SessionInfo {
+                    app_id: dbus_name.to_string(),
+                    app_name: get_identity(&connection, dbus_name).await,
+                };
+                session_infos.write().await.insert(session_info);
+
+                if is_app_allowed(&normalize_dbus_name(dbus_name)) {
+                    start_tracking_player(
+                        &connection,
+                        dbus_name.to_string(),
+                        &mut names_to_handles.write().await,
+                    );
+                }
+            }
+
+            // handle player removed
+            if old_owner.is_some() && new_owner.is_none() {
+                stop_tracking_player(names_to_handles.write().await.remove(dbus_name));
+
+                // remove the entry from session_infos
+                session_infos
+                    .write()
+                    .await
+                    .retain(|session_info| session_info.app_id != dbus_name);
+            }
+
+            let active_players = session_infos
+                .read()
+                .await
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            send_active_players(&active_players);
+        }
+        Ok::<(), zbus::Error>(())
+    };
+    let ipc_commands = ipc::commands_listener(jni_callback);
+
+    tokio::try_join!(
+        incoming_events.map_err(Into::into),
+        mpris_events.map_err(Into::into),
+        ipc_commands
     )?;
 
     Ok(())

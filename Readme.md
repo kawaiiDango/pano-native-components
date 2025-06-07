@@ -3,7 +3,11 @@
 A JNI lib, used for accessing some native APIs on desktop, that are not possible with JVM.
 
 
-To build:
+This project was compiled with rust nightly.
+It may use features that are not available in rust stable.
+
+
+### Build
 
 ```
 cargo build --release
@@ -11,7 +15,7 @@ cargo build --release
 
 Linux needs additional dependencies listed at [tauri-apps/wry](https://github.com/tauri-apps/wry)
 
-To test: 
+### Test
 
 ```
 javac -h . PanoNativeComponents.java
@@ -25,7 +29,7 @@ or (if Powershell)
 cargo build --release && javac -d . PanoNativeComponents.java && java "-Djava.library.path=target/release/" com.arn.scrobble.PanoNativeComponents
 ```
 
-To package:
+### Package
 
 ```
 cp target/release/pano_native_components.dll pano-scrobbler-dir/composeApp/resources/windows-x64/
@@ -34,7 +38,6 @@ cp target/release/pano_native_components.dll pano-scrobbler-dir/composeApp/resou
 ```
 cp target/release/libpano_native_components.so pano-scrobbler-dir/composeApp/resources/linux-x64/
 ```
-
 
 
 I used code from these projects as a reference:

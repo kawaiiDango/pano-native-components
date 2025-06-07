@@ -20,6 +20,7 @@ winit = { version = "0.30", default-features = false, features = [
     "x11",
     "rwh_06",
 ] }
+interprocess = { version = "2.2", features = ["tokio"] }
 # discord-presence = { version = "1.4", features = ["activity_type"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -34,8 +35,6 @@ windows = { version = "0.61", features = [
     "Media_Control",
     "Foundation_Collections",
     "ApplicationModel",
-    "Win32_System_Threading",
-    "Win32_Security",
     "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
 ] }

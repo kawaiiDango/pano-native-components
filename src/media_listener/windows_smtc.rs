@@ -1,3 +1,4 @@
+use crate::ipc;
 use crate::media_info_structs::{
     IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo,
 };
@@ -39,7 +40,10 @@ static CALLBACK_TOKENS_MAP: LazyLock<Mutex<HashMap<String, CallbackTokens>>> =
 
 // based on https://github.com/KDE/kdeconnect-kde/blob/master/plugins/mpriscontrol/mpriscontrolplugin-win.cpp
 
-pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main(flavor = "current_thread")]
+pub async fn listener(
+    jni_callback: impl Fn(String, String, String) + 'static,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = mpsc::channel(100);
 
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(tx);
@@ -66,61 +70,70 @@ pub fn listener() -> Result<(), Box<dyn std::error::Error>> {
     // force update on start
     update_sessions(&manager);
 
-    while let Some(event) = rx.blocking_recv() {
-        match event {
-            IncomingPlayerEvent::Skip(app_id) => {
-                for session in manager.GetSessions().unwrap().into_iter() {
-                    let session_app_id = session
-                        .SourceAppUserModelId()
-                        .expect("Failed to get app ID")
-                        .to_string();
+    let session_events = async {
+        while let Some(event) = rx.recv().await {
+            match event {
+                IncomingPlayerEvent::Skip(app_id) => {
+                    for session in manager.GetSessions().unwrap().into_iter() {
+                        let session_app_id = session
+                            .SourceAppUserModelId()
+                            .expect("Failed to get app ID")
+                            .to_string();
 
-                    if session_app_id == app_id {
-                        let _ = session.TrySkipNextAsync();
+                        if session_app_id == app_id {
+                            let _ = session.TrySkipNextAsync();
 
-                        break;
+                            break;
+                        }
                     }
                 }
-            }
-            IncomingPlayerEvent::RefreshSessions => {
-                update_sessions(&manager);
-            }
-
-            IncomingPlayerEvent::Shutdown => {
-                INCOMING_PLAYER_EVENT_TX.lock().unwrap().take();
-
-                let mut callback_tokens_map = CALLBACK_TOKENS_MAP.lock().unwrap();
-
-                // remove listeners
-
-                for session in manager.GetSessions().unwrap().into_iter() {
-                    let session_app_id = session
-                        .SourceAppUserModelId()
-                        .expect("Failed to get app ID")
-                        .to_string();
-
-                    if let Some(tokens) = callback_tokens_map.remove(&session_app_id) {
-                        let _ = session.RemovePlaybackInfoChanged(tokens.playback_info_changed);
-                        let _ =
-                            session.RemoveMediaPropertiesChanged(tokens.media_properties_changed);
-                        let _ = session
-                            .RemoveTimelinePropertiesChanged(tokens.timeline_properties_changed);
-                    }
+                IncomingPlayerEvent::RefreshSessions => {
+                    update_sessions(&manager);
                 }
-                let _ = manager.RemoveSessionsChanged(sessions_changed_token);
 
-                // clear caches
-                callback_tokens_map.clear();
-                PLAYBACK_INFO_CACHE.lock().unwrap().clear();
-                METADATA_INFO_CACHE.lock().unwrap().clear();
-                APP_NAMES_CACHE.lock().unwrap().clear();
-                PREV_APP_IDS.lock().unwrap().clear();
+                IncomingPlayerEvent::Shutdown => {
+                    INCOMING_PLAYER_EVENT_TX.lock().unwrap().take();
 
-                break;
+                    let mut callback_tokens_map = CALLBACK_TOKENS_MAP.lock().unwrap();
+
+                    // remove listeners
+
+                    for session in manager.GetSessions().unwrap().into_iter() {
+                        let session_app_id = session
+                            .SourceAppUserModelId()
+                            .expect("Failed to get app ID")
+                            .to_string();
+
+                        if let Some(tokens) = callback_tokens_map.remove(&session_app_id) {
+                            let _ = session.RemovePlaybackInfoChanged(tokens.playback_info_changed);
+                            let _ = session
+                                .RemoveMediaPropertiesChanged(tokens.media_properties_changed);
+                            let _ = session.RemoveTimelinePropertiesChanged(
+                                tokens.timeline_properties_changed,
+                            );
+                        }
+                    }
+                    let _ = manager.RemoveSessionsChanged(sessions_changed_token);
+
+                    // clear caches
+                    callback_tokens_map.clear();
+                    PLAYBACK_INFO_CACHE.lock().unwrap().clear();
+                    METADATA_INFO_CACHE.lock().unwrap().clear();
+                    APP_NAMES_CACHE.lock().unwrap().clear();
+                    PREV_APP_IDS.lock().unwrap().clear();
+
+                    break;
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
+
+        Ok::<(), Box<dyn std::error::Error>>(())
+    };
+
+    let automation_commands = ipc::commands_listener(jni_callback);
+
+    tokio::try_join!(session_events, automation_commands)?;
 
     Ok(())
 }

@@ -6,8 +6,8 @@ mod media_listener;
 #[cfg(not(target_os = "macos"))]
 mod notifications;
 
+mod ipc;
 mod pano_tray;
-mod single_instance;
 mod user_event;
 mod webview;
 mod webview_event;
@@ -17,25 +17,22 @@ use event_loop::send_user_event;
 use jni::sys::{jboolean, jint, jlong};
 
 use jni::JNIEnv;
-use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString, ReleaseMode};
+use jni::objects::{JClass, JIntArray, JObjectArray, JString, ReleaseMode};
 
 use media_info_structs::IncomingPlayerEvent;
 use media_listener::listener;
 use pano_tray::PanoTray;
-use single_instance::SingleInstance;
 use tokio::sync::mpsc;
 use user_event::UserEvent;
 
 use std::collections::HashSet;
 use std::env;
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
-
-static INSTANCE_HANDLE: OnceLock<SingleInstance> = OnceLock::new();
 
 // This `#[no_mangle]` keeps rust from "mangling" the name and making it unique
 // for this crate. The name follow a strict naming convention so that the
@@ -110,14 +107,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopListeningM
     _class: JClass,
 ) {
     send_incoming_player_event(IncomingPlayerEvent::Shutdown);
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopEventLoop(
-    _env: JNIEnv,
-    _class: JClass,
-) {
-    send_user_event(UserEvent::ShutdownEventLoop);
 }
 
 #[unsafe(no_mangle)]
@@ -264,36 +253,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getMachineId<'
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isSingleInstance(
-    mut env: JNIEnv,
-    _class: JClass,
-    name: JString,
-) -> jboolean {
-    let name: String = env
-        .get_string(&name)
-        .expect("Couldn't get java string!")
-        .into();
-
-    let instance = SingleInstance::new(&name);
-
-    match instance {
-        Ok(instance) => {
-            if instance.is_single() {
-                let _ = INSTANCE_HANDLE.set(instance);
-                1
-            } else {
-                drop(instance);
-                0
-            }
-        }
-        Err(e) => {
-            eprintln!("Error creating single instance: {e}");
-            0
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_launchWebView(
     mut env: JNIEnv,
     _class: JClass,
@@ -349,6 +308,32 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_applyDarkModeT
 ) {
     #[cfg(target_os = "windows")]
     windows_utils::apply_dark_mode_to_window(handle);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand(
+    mut env: JNIEnv,
+    _class: JClass,
+    command: JString,
+    arg: JString,
+) -> jboolean {
+    let command: String = env
+        .get_string(&command)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let arg: String = env
+        .get_string(&arg)
+        .expect("Couldn't get java string!")
+        .into();
+
+    match ipc::send_command(&command, &arg) {
+        Ok(_) => 1, // true
+        Err(e) => {
+            eprintln!("Error sending ipc command: {e}");
+            0 // false
+        }
+    }
 }
 
 // #[unsafe(no_mangle)]
@@ -448,15 +433,33 @@ pub fn on_playback_state_changed(json_data: String) {
 //         .unwrap();
 // }
 
-fn string_tx_call_me_back(env: &mut JNIEnv, callback: &JObject, java_method_name: &str, msg: &str) {
-    let java_msg = env
-        .new_string(msg)
-        .unwrap_or_else(|_| panic!("Couldn't create java string for {java_method_name}"));
-    let result = env.call_method(
-        callback,
+fn string_tx_call_java_static_method2(
+    env: &mut JNIEnv,
+    java_method_name: &str,
+    arg1: &str,
+    arg2: &str,
+) {
+    let java_arg1 = env.new_string(arg1).unwrap();
+    let java_arg2 = env.new_string(arg2).unwrap();
+    let result = env.call_static_method(
+        "com/arn/scrobble/PanoNativeComponents",
+        java_method_name,
+        "(Ljava/lang/String;Ljava/lang/String;)V",
+        &[(&java_arg1).into(), (&java_arg2).into()],
+    );
+
+    if let Err(e) = result {
+        eprintln!("Error calling java method {java_method_name}: {e}");
+    }
+}
+
+fn string_tx_call_java_static_method1(env: &mut JNIEnv, java_method_name: &str, arg1: &str) {
+    let java_arg1 = env.new_string(arg1).unwrap();
+    let result = env.call_static_method(
+        "com/arn/scrobble/PanoNativeComponents",
         java_method_name,
         "(Ljava/lang/String;)V",
-        &[(&java_msg).into()],
+        &[(&java_arg1).into()],
     );
 
     if let Err(e) = result {
@@ -468,23 +471,24 @@ fn string_tx_call_me_back(env: &mut JNIEnv, callback: &JObject, java_method_name
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startEventLoop(
     env: JNIEnv,
     _class: JClass,
-    callback: JObject,
 ) {
-    let global_ref_callback = env.new_global_ref(callback).unwrap();
     let jvm = env.get_java_vm().unwrap();
     event_loop::event_loop(move |method_name, msg| {
         let mut env = jvm.attach_current_thread().unwrap();
-        string_tx_call_me_back(&mut env, &global_ref_callback, &method_name, &msg);
+        string_tx_call_java_static_method1(&mut env, &method_name, &msg);
     });
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListeningMedia(
-    _env: JNIEnv,
+    env: JNIEnv,
     _class: JClass,
 ) {
-    if let Err(e) = listener() {
-        // zbus::Error::Unsupported is a dummy error that I create on linux
+    let jvm = env.get_java_vm().unwrap();
+    if let Err(e) = listener(move |method_name, arg1, arg2| {
+        let mut env = jvm.attach_current_thread().unwrap();
+        string_tx_call_java_static_method2(&mut env, &method_name, &arg1, &arg2);
+    }) {
         log_warn(&format!("Error listening for media: {e}"));
     }
 }

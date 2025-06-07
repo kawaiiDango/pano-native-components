@@ -34,14 +34,14 @@ struct PanoApplication {
     #[cfg(target_os = "windows")]
     tray_icon: Option<TrayIcon>,
     #[cfg(target_os = "windows")]
-    jni_callback: Box<dyn FnMut(String, String)>,
+    jni_callback: Box<dyn Fn(String, String)>,
     initial_event: Option<UserEvent>,
     webview_window: Option<(Window, WebView, WebContext)>,
 }
 
 impl PanoApplication {
     #[cfg(target_os = "windows")]
-    fn new(jni_callback: Box<dyn FnMut(String, String)>) -> PanoApplication {
+    fn new(jni_callback: Box<dyn Fn(String, String)>) -> PanoApplication {
         PanoApplication {
             tray_icon: None,
             jni_callback,
@@ -187,11 +187,6 @@ impl ApplicationHandler<UserEvent> for PanoApplication {
                 self.update_tray(&pano_tray);
             }
 
-            UserEvent::ShutdownEventLoop => {
-                self.quit_webview();
-                // event_loop.exit();
-            }
-
             UserEvent::LaunchWebview(url, callback_prefix, data_dir) => {
                 let mut window_attributes = WindowAttributes::default()
                     .with_inner_size(LogicalSize::new(640.0, 480.0))
@@ -201,7 +196,8 @@ impl ApplicationHandler<UserEvent> for PanoApplication {
                 #[cfg(target_os = "linux")]
                 {
                     use winit::platform::x11::WindowAttributesExtX11;
-                    window_attributes = window_attributes.with_x11_class_name("pano-scrobbler");
+                    window_attributes =
+                        window_attributes.with_name("pano-scrobbler", "pano-scrobbler");
                 }
 
                 #[cfg(target_os = "windows")]
@@ -277,7 +273,7 @@ impl ApplicationHandler<UserEvent> for PanoApplication {
 }
 
 #[cfg(target_os = "windows")]
-pub fn event_loop(jni_callback: impl FnMut(String, String) + 'static) {
+pub fn event_loop(jni_callback: impl Fn(String, String) + 'static) {
     use tray_icon::menu::MenuEvent;
     use winit::platform::windows::EventLoopBuilderExtWindows;
 

@@ -7,5 +7,4 @@ pub enum UserEvent {
     LaunchWebview(String, String, String),
     WebViewCookiesFor(String),
     QuitWebview,
-    ShutdownEventLoop,
 }
