@@ -38,12 +38,15 @@ public class PanoNativeComponents {
 
     static native boolean sendIpcCommand(String command, String arg);
 
+    static native String getSystemLocale();
+
     static {
         System.loadLibrary("pano_native_components");
     }
 
     public static void main(String[] args) {
         System.out.println(ping("🪼hello " + getMachineId()));
+        System.out.println("locale: " + getSystemLocale());
         applyDarkModeToWindow(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
 

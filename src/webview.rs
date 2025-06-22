@@ -15,7 +15,7 @@ pub fn create_webview(
     let on_page_load1 = Rc::new(on_page_load);
     let on_page_load2 = on_page_load1.clone();
 
-    WebViewBuilder::with_web_context(context)
+    WebViewBuilder::new_with_web_context(context)
         // WebViewBuilder::new()
         .with_url(&url)
         .with_navigation_handler(move |url| {

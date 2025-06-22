@@ -1,8 +1,10 @@
 use windows::Win32::Foundation::{HMODULE, HWND};
+use windows::Win32::Globalization::{
+    GetLocaleInfoEx, GetUserDefaultLocaleName, LOCALE_SISO639LANGNAME, LOCALE_SISO3166CTRYNAME,
+};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-use windows::core::{PCSTR, s};
-
+use windows::core::{PCSTR, PCWSTR, s};
 // use windows_registry::CURRENT_USER;
 
 // const REG_NAME: &str = "Pano Scrobbler";
@@ -71,5 +73,48 @@ pub fn apply_dark_mode_to_window(handle: i64) {
         .unwrap_or_else(|e| {
             eprintln!("Failed to set DWMWA_USE_IMMERSIVE_DARK_MODE for window {handle}: {e}");
         });
+    }
+}
+
+pub fn get_language_country_codes() -> Result<(String, String), Box<dyn std::error::Error>> {
+    unsafe {
+        // Get the current user's locale name
+        let mut locale_name = [0u16; 85]; // LOCALE_NAME_MAX_LENGTH
+        let result = GetUserDefaultLocaleName(&mut locale_name);
+        if result == 0 {
+            return Err("Failed to get user default locale name".into());
+        }
+
+        let locale_name_ptr = PCWSTR::from_raw(locale_name.as_ptr());
+
+        // Get language code (ISO 639)
+        let mut lang_buffer = [0u16; 10];
+        let lang_result = GetLocaleInfoEx(
+            locale_name_ptr,
+            LOCALE_SISO639LANGNAME,
+            Some(&mut lang_buffer),
+        );
+
+        if lang_result == 0 {
+            return Err("Failed to get language code".into());
+        }
+
+        // Get country code (ISO 3166)
+        let mut country_buffer = [0u16; 10];
+        let country_result = GetLocaleInfoEx(
+            locale_name_ptr,
+            LOCALE_SISO3166CTRYNAME,
+            Some(&mut country_buffer),
+        );
+
+        if country_result == 0 {
+            return Err("Failed to get country code".into());
+        }
+
+        // Convert UTF-16 to String
+        let language = String::from_utf16_lossy(&lang_buffer[..lang_result as usize - 1]);
+        let country = String::from_utf16_lossy(&country_buffer[..country_result as usize - 1]);
+
+        Ok((language, country))
     }
 }

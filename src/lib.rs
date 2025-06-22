@@ -336,6 +336,29 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getSystemLocale<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JString<'a> {
+    #[cfg(target_os = "windows")]
+    {
+        let (language, country) = windows_utils::get_language_country_codes()
+            .unwrap_or(("en".to_string(), "US".to_string()));
+        let locale = format!("{language}-{country}");
+        env.new_string(locale)
+            .expect("Couldn't create java string!")
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // will not be using this on linux, just return something
+        let locale = "en-US".to_string();
+        env.new_string(locale)
+            .expect("Couldn't create java string!")
+    }
+}
+
 // #[unsafe(no_mangle)]
 // pub extern "system" fn  Java_com_arn_scrobble_media_DesktopMediaListenerWrapper_asyncComputation(
 //     env: JNIEnv,
