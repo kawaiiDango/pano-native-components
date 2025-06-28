@@ -30,12 +30,6 @@ public class PanoNativeComponents {
 
     static native void applyDarkModeToWindow(long handle);
 
-    static native void launchWebView(String url, String callbackPrefix, String dataDir);
-
-    static native void getWebViewCookiesFor(String url);
-
-    static native void quitWebView();
-
     static native boolean sendIpcCommand(String command, String arg);
 
     static native String getSystemLocale();
@@ -68,8 +62,7 @@ public class PanoNativeComponents {
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
-                    // launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview");
-
+                    
                     System.out.println("startListeningMedia");
                     startListeningMedia();
                     System.out.println("startListeningMedia finished");
@@ -112,8 +105,6 @@ public class PanoNativeComponents {
 
                 });
 
-                getWebViewCookiesFor("https://fonts.google.com");
-
                 try {
                     Thread.sleep(5000);
                 } catch (InterruptedException e) {
@@ -126,14 +117,6 @@ public class PanoNativeComponents {
             }
         }).start();
 
-    }
-
-    public static void onLogInfo(String msg) {
-        System.out.println("info: " + msg);
-    }
-
-    public static void onLogWarn(String msg) {
-        System.err.println("warn: " + msg);
     }
 
     public static void onActiveSessionsChanged(String json) {
@@ -150,14 +133,6 @@ public class PanoNativeComponents {
 
     public static void onTrayMenuItemClicked(String id) {
         System.out.println("onTrayMenuItemClicked: " + id);
-    }
-
-    public static void onWebViewCookies(String cookies) {
-        System.out.println("onWebViewCookies: " + cookies);
-    }
-
-    public static void onWebViewPageLoad(String url) {
-        System.out.println("onWebViewPageLoad: " + url);
     }
 
     public static void onReceiveIpcCommand(String command, String arg) {

@@ -33,10 +33,12 @@ cargo build --release && javac -d . PanoNativeComponents.java && java "-Djava.li
 
 ```
 cp target/release/pano_native_components.dll pano-scrobbler-dir/composeApp/resources/windows-x64/
+cp target/release/native_webview.dll pano-scrobbler-dir/composeApp/resources/windows-x64/
 ```
 
 ```
 cp target/release/libpano_native_components.so pano-scrobbler-dir/composeApp/resources/linux-x64/
+cp target/release/libnative_webview.so pano-scrobbler-dir/composeApp/resources/linux-x64/
 ```
 
 

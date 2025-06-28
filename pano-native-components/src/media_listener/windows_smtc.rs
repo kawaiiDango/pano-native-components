@@ -3,8 +3,8 @@ use crate::media_info_structs::{
     IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo,
 };
 use crate::{
-    INCOMING_PLAYER_EVENT_TX, is_app_allowed, log_warn, on_active_sessions_changed,
-    on_metadata_changed, on_playback_state_changed,
+    INCOMING_PLAYER_EVENT_TX, is_app_allowed, on_active_sessions_changed, on_metadata_changed,
+    on_playback_state_changed,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -60,7 +60,7 @@ pub async fn listener(
                     update_sessions(m);
                 }
                 None => {
-                    log_warn("SessionsChanged event handler received None");
+                    eprintln!("SessionsChanged event handler received None");
                 }
             }
             Ok(())
@@ -237,7 +237,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
                         handle_playback_info_changed(session);
                     }
                     None => {
-                        log_warn("PlaybackInfoChanged event handler received None");
+                        eprintln!("PlaybackInfoChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -254,7 +254,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
                         handle_media_properties_changed(session);
                     }
                     None => {
-                        log_warn("MediaPropertiesChanged event handler received None");
+                        eprintln!("MediaPropertiesChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -271,7 +271,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
                         handle_timeline_properties_changed(session);
                     }
                     None => {
-                        log_warn("TimelinePropertiesChanged event handler received None");
+                        eprintln!("TimelinePropertiesChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -360,7 +360,7 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
 
         on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
     } else {
-        log_warn("Failed to get playback state");
+        eprintln!("Failed to get playback state");
     }
 }
 
@@ -416,7 +416,7 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
 
         on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
     } else {
-        log_warn("Failed to get media properties");
+        eprintln!("Failed to get media properties");
     }
 }
 
@@ -499,6 +499,6 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
             };
         }
     } else {
-        log_warn("Failed to get timeline properties");
+        eprintln!("Failed to get timeline properties");
     }
 }

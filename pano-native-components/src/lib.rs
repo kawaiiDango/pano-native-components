@@ -1,4 +1,3 @@
-mod event_loop;
 mod machine_uid;
 mod media_info_structs;
 mod media_listener;
@@ -8,26 +7,25 @@ mod notifications;
 
 mod ipc;
 mod pano_tray;
+mod tokio_loop;
 mod user_event;
-mod webview;
-mod webview_event;
 mod windows_utils;
 
-use event_loop::send_user_event;
 use jni::sys::{jboolean, jint, jlong};
 
 use jni::JNIEnv;
-use jni::objects::{JClass, JIntArray, JObjectArray, JString, ReleaseMode};
+use jni::objects::{JClass, JIntArray, JObjectArray, JString};
 
 use media_info_structs::IncomingPlayerEvent;
 use media_listener::listener;
-use pano_tray::PanoTray;
 use tokio::sync::mpsc;
 use user_event::UserEvent;
 
 use std::collections::HashSet;
 use std::env;
 use std::sync::{LazyLock, Mutex};
+
+use crate::tokio_loop::{send_tokio_event, tokio_event_loop};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -192,55 +190,62 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
     menu_item_ids: JObjectArray,
     menu_item_texts: JObjectArray,
 ) {
-    let tooltip: String = env
-        .get_string(&tooltip)
-        .expect("Couldn't get java string!")
-        .into();
+    #[cfg(target_os = "linux")]
+    {
+        use jni::objects::ReleaseMode;
 
-    let len: usize = env.get_array_length(&argb).unwrap().try_into().unwrap();
+        use crate::pano_tray::PanoTray;
 
-    let argb_rust = unsafe {
-        env.get_array_elements(&argb, ReleaseMode::NoCopyBack)
-            .unwrap()
-    };
+        let tooltip: String = env
+            .get_string(&tooltip)
+            .expect("Couldn't get java string!")
+            .into();
 
-    let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
+        let len: usize = env.get_array_length(&argb).unwrap().try_into().unwrap();
 
-    for &argb in argb_rust.iter() {
-        let a = (argb >> 24) as u8;
-        let r = (argb >> 16) as u8;
-        let g = (argb >> 8) as u8;
-        let b = argb as u8;
+        let argb_rust = unsafe {
+            env.get_array_elements(&argb, ReleaseMode::NoCopyBack)
+                .unwrap()
+        };
 
-        icon_argb.push(a);
-        icon_argb.push(r);
-        icon_argb.push(b);
-        icon_argb.push(g);
+        let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
+
+        for &argb in argb_rust.iter() {
+            let a = (argb >> 24) as u8;
+            let r = (argb >> 16) as u8;
+            let g = (argb >> 8) as u8;
+            let b = argb as u8;
+
+            icon_argb.push(a);
+            icon_argb.push(r);
+            icon_argb.push(b);
+            icon_argb.push(g);
+        }
+
+        let icon_dim: u32 = icon_dim as u32;
+
+        let len = env.get_array_length(&menu_item_ids).unwrap();
+        let mut menu_items = Vec::<(String, String)>::with_capacity(len.try_into().unwrap());
+
+        for i in 0..len {
+            let id = env.get_object_array_element(&menu_item_ids, i);
+            let id = id.unwrap();
+            let id = env.get_string(&JString::from(id)).unwrap().into();
+
+            let text = env.get_object_array_element(&menu_item_texts, i);
+            let text = text.unwrap();
+            let text = env.get_string(&JString::from(text)).unwrap().into();
+
+            menu_items.push((id, text));
+        }
+
+        send_tokio_event(UserEvent::UpdateTray(PanoTray {
+            tooltip,
+            icon_argb,
+            icon_dim,
+            menu_items,
+        }));
     }
-
-    let icon_dim: u32 = icon_dim as u32;
-
-    let len = env.get_array_length(&menu_item_ids).unwrap();
-    let mut menu_items = Vec::<(String, String)>::with_capacity(len.try_into().unwrap());
-
-    for i in 0..len {
-        let id = env.get_object_array_element(&menu_item_ids, i);
-        let id = id.unwrap();
-        let id = env.get_string(&JString::from(id)).unwrap().into();
-
-        let text = env.get_object_array_element(&menu_item_texts, i);
-        let text = text.unwrap();
-        let text = env.get_string(&JString::from(text)).unwrap().into();
-
-        menu_items.push((id, text));
-    }
-
-    send_user_event(UserEvent::UpdateTray(PanoTray {
-        tooltip,
-        icon_argb,
-        icon_dim,
-        menu_items,
-    }));
 }
 
 #[unsafe(no_mangle)]
@@ -250,54 +255,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getMachineId<'
 ) -> JString<'a> {
     let id = machine_uid::get().unwrap();
     env.new_string(id).expect("Couldn't create java string!")
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_launchWebView(
-    mut env: JNIEnv,
-    _class: JClass,
-    url: JString,
-    callback_prefix: JString,
-    data_dir: JString,
-) {
-    let url: String = env
-        .get_string(&url)
-        .expect("Couldn't get java string!")
-        .into();
-
-    let callback_prefix: String = env
-        .get_string(&callback_prefix)
-        .expect("Couldn't get java string!")
-        .into();
-
-    let data_dir: String = env
-        .get_string(&data_dir)
-        .expect("Couldn't get java string!")
-        .into();
-
-    send_user_event(UserEvent::LaunchWebview(url, callback_prefix, data_dir));
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getWebViewCookiesFor(
-    mut env: JNIEnv,
-    _class: JClass,
-    url: JString,
-) {
-    let url: String = env
-        .get_string(&url)
-        .expect("Couldn't get java string!")
-        .into();
-
-    send_user_event(UserEvent::WebViewCookiesFor(url));
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_quitWebView(
-    _env: JNIEnv,
-    _class: JClass,
-) {
-    send_user_event(UserEvent::QuitWebview);
 }
 
 #[unsafe(no_mangle)]
@@ -352,8 +309,30 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getSystemLocal
 
     #[cfg(target_os = "linux")]
     {
-        // will not be using this on linux, just return something
-        let locale = "en-US".to_string();
+        // from https://github.com/i509VCB/current_locale/blob/master/src/unix.rs
+
+        // Unix uses the LANG environment variable to store the locale
+        let locale = match env::var("LANG") {
+            Ok(raw_lang) => {
+                // Unset locale - C ANSI standards say default to en-US
+                if raw_lang == "C" {
+                    "en-US".to_owned()
+                } else if let Some(pos) = raw_lang.find([' ', '.']) {
+                    let (raw_lang_code, _) = raw_lang.split_at(pos);
+                    let result = raw_lang_code.replace("_", "-");
+
+                    // Finally replace underscores with `-` and drop everything after an `@`
+                    result.split('@').next().unwrap().to_string()
+                } else {
+                    "en-US".to_string() // Default to en-US if LANG is not set or malformed
+                }
+            }
+
+            Err(_) => {
+                "en-US".to_string() // Default to en-US if LANG is not set
+            }
+        };
+
         env.new_string(locale)
             .expect("Couldn't create java string!")
     }
@@ -413,36 +392,22 @@ pub fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
     }
 }
 
-pub fn log_info(msg: &str) {
-    send_user_event(UserEvent::JniCallback(
-        "onLogInfo".to_string(),
-        msg.to_string(),
-    ));
-}
-
-pub fn log_warn(msg: &str) {
-    send_user_event(UserEvent::JniCallback(
-        "onLogWarn".to_string(),
-        msg.to_string(),
-    ));
-}
-
 pub fn on_active_sessions_changed(json_data: String) {
-    send_user_event(UserEvent::JniCallback(
+    send_tokio_event(UserEvent::JniCallback(
         "onActiveSessionsChanged".to_string(),
         json_data,
     ));
 }
 
 pub fn on_metadata_changed(json_data: String) {
-    send_user_event(UserEvent::JniCallback(
+    send_tokio_event(UserEvent::JniCallback(
         "onMetadataChanged".to_string(),
         json_data,
     ));
 }
 
 pub fn on_playback_state_changed(json_data: String) {
-    send_user_event(UserEvent::JniCallback(
+    send_tokio_event(UserEvent::JniCallback(
         "onPlaybackStateChanged".to_string(),
         json_data,
     ));
@@ -496,7 +461,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startEventLoop
     _class: JClass,
 ) {
     let jvm = env.get_java_vm().unwrap();
-    event_loop::event_loop(move |method_name, msg| {
+    tokio_event_loop(move |method_name, msg| {
         let mut env = jvm.attach_current_thread().unwrap();
         string_tx_call_java_static_method1(&mut env, &method_name, &msg);
     });
@@ -512,6 +477,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
         let mut env = jvm.attach_current_thread().unwrap();
         string_tx_call_java_static_method2(&mut env, &method_name, &arg1, &arg2);
     }) {
-        log_warn(&format!("Error listening for media: {e}"));
+        eprintln!("Error listening for media: {e}");
     }
 }
