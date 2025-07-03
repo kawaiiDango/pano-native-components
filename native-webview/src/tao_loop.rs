@@ -1,6 +1,5 @@
 use std::{path::PathBuf, sync::OnceLock};
 
-#[cfg(target_os = "windows")]
 use tao::{
     event::{Event, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},

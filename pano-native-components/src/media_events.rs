@@ -1,14 +1,5 @@
-use serde::Serialize;
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SessionInfo {
-    pub app_id: String,
-    pub app_name: String,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct MetadataInfo {
-    pub app_id: String,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -17,23 +8,21 @@ pub struct MetadataInfo {
     pub duration: i64,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct PlaybackInfo {
-    pub app_id: String,
     pub state: PlaybackState,
     pub position: i64,
     pub can_skip: bool,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct TimelineInfo {
-    pub app_id: String,
     pub duration: i64,
     pub position: i64,
     pub last_updated: i64,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(EnumString, strum::Display, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PlaybackState {
     None,
     Stopped,
@@ -42,6 +31,8 @@ pub enum PlaybackState {
     Waiting,
     Other,
 }
+
+use strum::EnumString;
 
 #[cfg(target_os = "macos")]
 use crate::media_listener::MediaRemoteEvent;

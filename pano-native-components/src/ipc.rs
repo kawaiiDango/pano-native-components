@@ -13,7 +13,7 @@ use {
 const PIPE_NAME: &str = "pano-scrobbler-ipc";
 
 pub async fn commands_listener(
-    jni_callback: impl Fn(String, String, String) + 'static,
+    ipc_callback: impl Fn(String, String) + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let name = PIPE_NAME.to_ns_name::<GenericNamespaced>()?;
 
@@ -44,11 +44,7 @@ pub async fn commands_listener(
                             let command = parts[0].trim();
                             let arg = parts[1].trim();
 
-                            jni_callback(
-                                "onReceiveIpcCommand".to_string(),
-                                command.to_string(),
-                                arg.to_string(),
-                            );
+                            ipc_callback(command.to_string(), arg.to_string());
                         }
 
                         buffer.clear();

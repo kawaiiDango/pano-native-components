@@ -1,13 +1,9 @@
 use crate::ipc;
-use crate::media_info_structs::{
-    IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo,
-};
-use crate::{
-    INCOMING_PLAYER_EVENT_TX, is_app_allowed, on_active_sessions_changed, on_metadata_changed,
-    on_playback_state_changed,
-};
+use crate::jni_callback::JniCallback;
+use crate::media_events::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState};
+use crate::{INCOMING_PLAYER_EVENT_TX, is_app_allowed};
 use std::collections::{HashMap, HashSet};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use tokio::sync::mpsc;
 use windows::ApplicationModel::AppInfo;
 use windows::Foundation::TypedEventHandler;
@@ -40,13 +36,19 @@ static CALLBACK_TOKENS_MAP: LazyLock<Mutex<HashMap<String, CallbackTokens>>> =
 
 // based on https://github.com/KDE/kdeconnect-kde/blob/master/plugins/mpriscontrol/mpriscontrolplugin-win.cpp
 
+static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::new();
+
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
-    jni_callback: impl Fn(String, String, String) + 'static,
+    jni_callback: impl Fn(JniCallback) + Send + Sync + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, mut rx) = mpsc::channel(100);
+    let (incoming_tx, mut incoming_rx) = mpsc::channel(10);
+    *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(incoming_tx);
 
-    *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(tx);
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
+    OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx).unwrap();
+
+    let jni_callback_arc = Arc::new(jni_callback);
 
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
 
@@ -71,7 +73,7 @@ pub async fn listener(
     update_sessions(&manager);
 
     let session_events = async {
-        while let Some(event) = rx.recv().await {
+        while let Some(event) = incoming_rx.recv().await {
             match event {
                 IncomingPlayerEvent::Skip(app_id) => {
                     for session in manager.GetSessions().unwrap().into_iter() {
@@ -131,9 +133,22 @@ pub async fn listener(
         Ok::<(), Box<dyn std::error::Error>>(())
     };
 
-    let automation_commands = ipc::commands_listener(jni_callback);
+    let outgoing_events = async {
+        while let Some(event) = outgoing_rx.recv().await {
+            jni_callback_arc(event);
+        }
 
-    tokio::try_join!(session_events, automation_commands)?;
+        Ok(())
+    };
+
+    // other listeners
+    let jni_callback = jni_callback_arc.clone();
+    let ipc_commands = ipc::commands_listener(move |command: String, arg: String| {
+        let event = JniCallback::IpcCallback(command, arg);
+        jni_callback(event);
+    });
+
+    tokio::try_join!(session_events, ipc_commands, outgoing_events)?;
 
     Ok(())
 }
@@ -149,7 +164,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
     //     .map(|x| (x.app_id.clone(), x))
     //     .collect::<HashMap<String, SessionInfo>>();
 
-    let mut all_session_infos_map: HashMap<String, SessionInfo> = HashMap::new();
+    let mut all_session_infos_map: HashMap<String, String> = HashMap::new();
 
     for session in manager.GetSessions().unwrap().into_iter() {
         let app_id_hstring = session
@@ -174,12 +189,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             app_name
         };
 
-        let session_info = SessionInfo {
-            app_id: app_id.clone(),
-            app_name,
-        };
-
-        all_session_infos_map.insert(app_id.clone(), session_info);
+        all_session_infos_map.insert(app_id.clone(), app_name);
     }
 
     let current_app_ids = all_session_infos_map
@@ -189,15 +199,18 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
 
     let mut prev_app_ids = PREV_APP_IDS.lock().unwrap();
     if current_app_ids != *prev_app_ids {
-        on_active_sessions_changed(
-            serde_json::to_string(
-                &all_session_infos_map
-                    .values()
-                    .cloned()
-                    .collect::<HashSet<SessionInfo>>(),
-            )
-            .unwrap(),
-        );
+        let sessions = all_session_infos_map
+            .iter()
+            .map(|(app_id, app_name)| (app_id.clone(), app_name.clone()))
+            .collect::<Vec<_>>();
+
+        let sessions_media_event = JniCallback::SessionsChanged(sessions);
+
+        // send the updated sessions to the JNI callback
+        let _ = OUTGOING_PLAYER_EVENT_TX
+            .get()
+            .unwrap()
+            .try_send(sessions_media_event);
 
         // remove cache for removed sessions
         // todo: also remove session listeners
@@ -347,7 +360,6 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
             .to_string();
 
         let playback_info = PlaybackInfo {
-            app_id: app_id.clone(),
             state,
             can_skip,
             position: -1, // this will be updated later from timeline properties
@@ -356,9 +368,12 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
         // insert into PLAYBACK_INFO_CACHE
 
         let mut cache = PLAYBACK_INFO_CACHE.lock().unwrap();
-        cache.insert(app_id, playback_info.clone());
+        cache.insert(app_id.clone(), playback_info.clone());
 
-        on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+        let _ = OUTGOING_PLAYER_EVENT_TX
+            .get()
+            .unwrap()
+            .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
     } else {
         eprintln!("Failed to get playback state");
     }
@@ -403,7 +418,6 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
         let existing_duration = cache.get(&app_id).map(|x| x.duration).unwrap_or(-1);
 
         let metadata_info = MetadataInfo {
-            app_id: app_id.clone(),
             title,
             artist,
             album,
@@ -414,7 +428,10 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
 
         cache.insert(app_id.clone(), metadata_info.clone());
 
-        on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
+        let _ = OUTGOING_PLAYER_EVENT_TX
+            .get()
+            .unwrap()
+            .try_send(JniCallback::MetadataChanged(app_id, metadata_info));
     } else {
         eprintln!("Failed to get media properties");
     }
@@ -467,7 +484,10 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
                 cache.insert(app_id.clone(), metadata_info.clone());
 
                 // report the updated metadata
-                on_metadata_changed(serde_json::to_string(&metadata_info).unwrap());
+                let _ = OUTGOING_PLAYER_EVENT_TX
+                    .get()
+                    .unwrap()
+                    .try_send(JniCallback::MetadataChanged(app_id.clone(), metadata_info));
             }
         }
 
@@ -486,17 +506,22 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
                     cache.insert(app_id.clone(), playback_info.clone());
 
                     // report the updated playback info
-                    on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
+                    let _ = OUTGOING_PLAYER_EVENT_TX
+                        .get()
+                        .unwrap()
+                        .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
                 }
             } else {
                 let playback_info = PlaybackInfo {
-                    app_id: app_id.clone(),
                     state: PlaybackState::None,
                     can_skip: false,
                     position,
                 };
-                on_playback_state_changed(serde_json::to_string(&playback_info).unwrap());
-            };
+                let _ = OUTGOING_PLAYER_EVENT_TX
+                    .get()
+                    .unwrap()
+                    .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
+            }
         }
     } else {
         eprintln!("Failed to get timeline properties");

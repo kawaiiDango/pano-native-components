@@ -1,31 +1,31 @@
 mod machine_uid;
-mod media_info_structs;
+mod media_events;
 mod media_listener;
 
 #[cfg(not(target_os = "macos"))]
 mod notifications;
+#[cfg(target_os = "linux")]
+mod tray;
 
 mod ipc;
-mod pano_tray;
-mod tokio_loop;
-mod user_event;
+mod jni_callback;
 mod windows_utils;
 
 use jni::sys::{jboolean, jint, jlong};
 
 use jni::JNIEnv;
-use jni::objects::{JClass, JIntArray, JObjectArray, JString};
+use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString};
 
-use media_info_structs::IncomingPlayerEvent;
+use jni_callback::JniCallback;
+use media_events::IncomingPlayerEvent;
 use media_listener::listener;
 use tokio::sync::mpsc;
-use user_event::UserEvent;
 
 use std::collections::HashSet;
 use std::env;
 use std::sync::{LazyLock, Mutex};
 
-use crate::tokio_loop::{send_tokio_event, tokio_event_loop};
+use crate::media_events::{MetadataInfo, PlaybackInfo};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -194,7 +194,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
     {
         use jni::objects::ReleaseMode;
 
-        use crate::pano_tray::PanoTray;
+        use crate::tray::{PanoTrayData, update_tray};
 
         let tooltip: String = env
             .get_string(&tooltip)
@@ -239,12 +239,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
             menu_items.push((id, text));
         }
 
-        send_tokio_event(UserEvent::UpdateTray(PanoTray {
+        update_tray(PanoTrayData {
             tooltip,
             icon_argb,
             icon_dim,
             menu_items,
-        }));
+        });
     }
 }
 
@@ -392,79 +392,122 @@ pub fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
     }
 }
 
-pub fn on_active_sessions_changed(json_data: String) {
-    send_tokio_event(UserEvent::JniCallback(
-        "onActiveSessionsChanged".to_string(),
-        json_data,
-    ));
-}
+fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
+    let result = match event {
+        JniCallback::SessionsChanged(app_ids_to_names) => {
+            let string_class = env.find_class("java/lang/String").unwrap();
 
-pub fn on_metadata_changed(json_data: String) {
-    send_tokio_event(UserEvent::JniCallback(
-        "onMetadataChanged".to_string(),
-        json_data,
-    ));
-}
+            // Create a Java String array
+            let app_ids = env
+                .new_object_array(
+                    app_ids_to_names.len() as jint,
+                    &string_class,
+                    JObject::null(),
+                )
+                .unwrap();
+            let app_names = env
+                .new_object_array(
+                    app_ids_to_names.len() as jint,
+                    &string_class,
+                    JObject::null(),
+                )
+                .unwrap();
 
-pub fn on_playback_state_changed(json_data: String) {
-    send_tokio_event(UserEvent::JniCallback(
-        "onPlaybackStateChanged".to_string(),
-        json_data,
-    ));
-}
+            // Populate the array
+            for (i, (app_id, app_name)) in app_ids_to_names.iter().enumerate() {
+                let j_app_id = env.new_string(app_id).unwrap();
+                env.set_object_array_element(&app_ids, i as jint, j_app_id)
+                    .unwrap();
 
-// pub fn on_timeline_properties_changed(json_data: String) {
-//     STRING_CHANNEL_TX
-//         .get()
-//         .unwrap()
-//         .send(("onTimelinePropertiesChanged", json_data))
-//         .unwrap();
-// }
+                let j_app_name = env.new_string(app_name).unwrap();
+                env.set_object_array_element(&app_names, i as jint, j_app_name)
+                    .unwrap();
+            }
 
-fn string_tx_call_java_static_method2(
-    env: &mut JNIEnv,
-    java_method_name: &str,
-    arg1: &str,
-    arg2: &str,
-) {
-    let java_arg1 = env.new_string(arg1).unwrap();
-    let java_arg2 = env.new_string(arg2).unwrap();
-    let result = env.call_static_method(
-        "com/arn/scrobble/PanoNativeComponents",
-        java_method_name,
-        "(Ljava/lang/String;Ljava/lang/String;)V",
-        &[(&java_arg1).into(), (&java_arg2).into()],
-    );
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onActiveSessionsChanged",
+                "([Ljava/lang/String;[Ljava/lang/String;)V",
+                &[(&app_ids).into(), (&app_names).into()],
+            )
+        }
+
+        JniCallback::MetadataChanged(
+            app_id,
+            MetadataInfo {
+                title,
+                artist,
+                album,
+                album_artist,
+                track_number,
+                duration,
+            },
+        ) => {
+            let app_id = env.new_string(app_id).unwrap();
+            let title = env.new_string(title).unwrap();
+            let artist = env.new_string(artist).unwrap();
+            let album = env.new_string(album).unwrap();
+            let album_artist = env.new_string(album_artist).unwrap();
+            let track_number = *track_number as jint;
+            let duration = *duration as jlong;
+            env.call_static_method(
+                    "com/arn/scrobble/PanoNativeComponents",
+                    "onMetadataChanged",
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJ)V",
+                    &[(&app_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into()],
+                )
+        }
+        JniCallback::PlaybackStateChanged(
+            app_id,
+            PlaybackInfo {
+                state,
+                position,
+                can_skip,
+            },
+        ) => {
+            let app_id = env.new_string(app_id).unwrap();
+            let state = env.new_string(state.to_string()).unwrap();
+            let position = *position as jlong;
+            let can_skip = *can_skip as jboolean;
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onPlaybackStateChanged",
+                "(Ljava/lang/String;Ljava/lang/String;JZ)V",
+                &[
+                    (&app_id).into(),
+                    (&state).into(),
+                    position.into(),
+                    can_skip.into(),
+                ],
+            )
+        }
+
+        JniCallback::IpcCallback(command, arg) => {
+            let command = env.new_string(command).unwrap();
+            let arg = env.new_string(arg).unwrap();
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onReceiveIpcCommand",
+                "(Ljava/lang/String;Ljava/lang/String;)V",
+                &[(&command).into(), (&arg).into()],
+            )
+        }
+
+        #[cfg(target_os = "linux")]
+        JniCallback::TrayItemClicked(item_id) => {
+            let item_id = env.new_string(item_id).unwrap();
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onTrayMenuItemClicked",
+                "(Ljava/lang/String;)V",
+                &[(&item_id).into()],
+            )
+        }
+    };
 
     if let Err(e) = result {
-        eprintln!("Error calling java method {java_method_name}: {e}");
+        eprintln!("Error calling java method: {e}");
     }
-}
-
-fn string_tx_call_java_static_method1(env: &mut JNIEnv, java_method_name: &str, arg1: &str) {
-    let java_arg1 = env.new_string(arg1).unwrap();
-    let result = env.call_static_method(
-        "com/arn/scrobble/PanoNativeComponents",
-        java_method_name,
-        "(Ljava/lang/String;)V",
-        &[(&java_arg1).into()],
-    );
-
-    if let Err(e) = result {
-        eprintln!("Error calling java method {java_method_name}: {e}");
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startEventLoop(
-    env: JNIEnv,
-    _class: JClass,
-) {
-    let jvm = env.get_java_vm().unwrap();
-    tokio_event_loop(move |method_name, msg| {
-        let mut env = jvm.attach_current_thread().unwrap();
-        string_tx_call_java_static_method1(&mut env, &method_name, &msg);
-    });
 }
 
 #[unsafe(no_mangle)]
@@ -473,9 +516,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
     _class: JClass,
 ) {
     let jvm = env.get_java_vm().unwrap();
-    if let Err(e) = listener(move |method_name, arg1, arg2| {
+    if let Err(e) = listener(move |event| {
         let mut env = jvm.attach_current_thread().unwrap();
-        string_tx_call_java_static_method2(&mut env, &method_name, &arg1, &arg2);
+        call_java_fn(&mut env, &event);
     }) {
         eprintln!("Error listening for media: {e}");
     }

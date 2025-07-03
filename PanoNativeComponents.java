@@ -8,8 +8,6 @@ public class PanoNativeComponents {
 
     private static native void startListeningMedia();
 
-    private static native void startEventLoop();
-
     static native void setEnvironmentVariable(String key, String value);
 
     static native void setAllowedAppIds(String[] appIds);
@@ -45,13 +43,6 @@ public class PanoNativeComponents {
         setEnvironmentVariable("GDK_BACKEND", "x11");
 
         sendIpcCommand("testCommand", "testArg");
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                startEventLoop();
-            }
-        }).start();
 
         new Thread(new Runnable() {
             @Override
@@ -97,7 +88,7 @@ public class PanoNativeComponents {
                             "foobar2000.exe",
                             "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App",
                             "org.mpris.MediaPlayer2.Lollypop",
-                            // "org.mpris.MediaPlayer2.elisa",
+                            "org.mpris.MediaPlayer2.elisa",
                             "org.mpris.MediaPlayer2.plasma-browser-integration",
                             "com.apple.Music",
                             "org.mpris.MediaPlayer2.cider",
@@ -113,22 +104,24 @@ public class PanoNativeComponents {
 
                 System.out.println("shutting down");
                 // setAllowedAppIds(new String[] {});
-                stopListeningMedia();
             }
         }).start();
 
     }
 
-    public static void onActiveSessionsChanged(String json) {
-        System.out.println("onActiveSessionsChanged: " + json);
+    public static void onActiveSessionsChanged(String[] appIds, String[] appNames) {
+        System.out.println("onActiveSessionsChanged: ");
+        for (int i = 0; i < appIds.length; i++) {
+            System.out.println("App ID: " + appIds[i] + ", App Name: " + appNames[i]);
+        }
     }
 
-    public static void onMetadataChanged(String json) {
-        System.out.println("onMetadataChanged: " + json);
+    public static void onMetadataChanged(String appId, String title, String artist, String album, String albumArtist, int trackNumber, long duration) {
+        System.out.println("onMetadataChanged: " + appId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration);
     }
 
-    public static void onPlaybackStateChanged(String json) {
-        System.out.println("onPlaybackStateChanged: " + json);
+    public static void onPlaybackStateChanged(String appId, String state, long position, boolean canSkip) {
+        System.out.println("onPlaybackStateChanged: " + appId + ", " + state + ", " + position + ", " + canSkip);
     }
 
     public static void onTrayMenuItemClicked(String id) {

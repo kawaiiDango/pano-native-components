@@ -1,5 +1,3 @@
-use crate::media_info_structs::PlaybackState;
-
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 /// A [`Player`]'s looping status.
 ///
@@ -26,18 +24,18 @@ impl std::fmt::Display for ParseErr {
     }
 }
 
-impl ::std::str::FromStr for PlaybackState {
-    type Err = ParseErr;
+// impl ::std::str::FromStr for PlaybackState {
+//     type Err = ParseErr;
 
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        match string {
-            "Playing" => Ok(PlaybackState::Playing),
-            "Paused" => Ok(PlaybackState::Paused),
-            "Stopped" => Ok(PlaybackState::Stopped),
-            other => Err(ParseErr(other.to_string())),
-        }
-    }
-}
+//     fn from_str(string: &str) -> Result<Self, Self::Err> {
+//         match string {
+//             "Playing" => Ok(PlaybackState::Playing),
+//             "Paused" => Ok(PlaybackState::Paused),
+//             "Stopped" => Ok(PlaybackState::Stopped),
+//             other => Err(ParseErr(other.to_string())),
+//         }
+//     }
+// }
 
 impl std::error::Error for ParseErr {}
 
