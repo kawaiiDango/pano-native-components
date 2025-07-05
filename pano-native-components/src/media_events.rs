@@ -1,3 +1,5 @@
+use strum::EnumString;
+
 #[derive(Debug, Clone)]
 pub struct MetadataInfo {
     pub title: String,
@@ -31,8 +33,6 @@ pub enum PlaybackState {
     Waiting,
     Other,
 }
-
-use strum::EnumString;
 
 #[cfg(target_os = "macos")]
 use crate::media_listener::MediaRemoteEvent;

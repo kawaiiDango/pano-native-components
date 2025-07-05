@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use tokio::sync::mpsc;
 
@@ -11,14 +11,13 @@ pub struct PanoTrayData {
 
 struct PanoTray {
     pub data: PanoTrayData,
-    pub callback: Arc<dyn Fn(String) + Send + Sync + 'static>,
 }
 
 static TOKIO_USER_EVENT_SENDER: OnceLock<mpsc::Sender<PanoTrayData>> = OnceLock::new();
+static OUTGOING_TRAY_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::new();
 
 pub fn update_tray(pano_tray_data: PanoTrayData) {
     if let Some(sender) = TOKIO_USER_EVENT_SENDER.get() {
-        // todo make it reliable by using async
         sender.try_send(pano_tray_data).unwrap_or_else(|_| {
             eprintln!("Failed to send tray event");
         });
@@ -28,6 +27,8 @@ pub fn update_tray(pano_tray_data: PanoTrayData) {
 }
 
 use ksni::{Icon, MenuItem, TrayMethods, menu::StandardItem};
+
+use crate::jni_callback::JniCallback;
 impl ksni::Tray for PanoTray {
     fn id(&self) -> String {
         "com.arn.scrobble.tray".into()
@@ -66,8 +67,12 @@ impl ksni::Tray for PanoTray {
                     "Separator" => MenuItem::Separator,
                     _ => MenuItem::Standard(StandardItem {
                         label: text_owned,
-                        activate: Box::new(move |tray: &mut PanoTray| {
-                            (tray.callback)(id_owned.clone());
+                        activate: Box::new(move |_tray| {
+                            OUTGOING_TRAY_EVENT_TX
+                                .get()
+                                .unwrap()
+                                .try_send(JniCallback::TrayItemClicked(id_owned.clone()))
+                                .unwrap();
                         }),
                         enabled: id != "Dummy",
                         ..Default::default()
@@ -79,23 +84,21 @@ impl ksni::Tray for PanoTray {
 }
 
 pub async fn tray_listener(
-    tray_callback: impl Fn(String) + Send + Sync + 'static,
+    callback_sender: mpsc::Sender<JniCallback>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (sender, mut receiver) = mpsc::channel::<PanoTrayData>(1);
+    let (sender, mut receiver) = mpsc::channel::<PanoTrayData>(10);
     TOKIO_USER_EVENT_SENDER.set(sender).unwrap();
+
+    OUTGOING_TRAY_EVENT_TX.set(callback_sender).unwrap();
 
     let tray_handle: OnceLock<ksni::Handle<PanoTray>> = OnceLock::new();
     let mut tray_init_attempted = false;
-    let tray_callback = Arc::new(tray_callback);
 
     while let Some(tray_data) = receiver.recv().await {
         if !tray_init_attempted {
             tray_init_attempted = true;
 
-            let tray = PanoTray {
-                data: tray_data,
-                callback: tray_callback.clone(),
-            };
+            let tray = PanoTray { data: tray_data };
             let handle = tray.spawn().await?;
             let _ = tray_handle.set(handle);
         } else if let Some(handle) = tray_handle.get() {

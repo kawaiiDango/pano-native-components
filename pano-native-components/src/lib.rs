@@ -95,7 +95,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
 }
 
 pub fn is_app_allowed(app_id: &str) -> bool {
-    // true
     APP_IDS_ALLOW_LIST.lock().unwrap().contains(app_id)
 }
 
@@ -287,7 +286,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand
     match ipc::send_command(&command, &arg) {
         Ok(_) => 1, // true
         Err(e) => {
-            eprintln!("Error sending ipc command: {e}");
+            if command != "focus-existing" {
+                eprintln!("Error sending ipc command: {e}");
+            }
             0 // false
         }
     }

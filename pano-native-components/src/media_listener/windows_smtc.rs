@@ -3,7 +3,7 @@ use crate::jni_callback::JniCallback;
 use crate::media_events::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState};
 use crate::{INCOMING_PLAYER_EVENT_TX, is_app_allowed};
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock};
 use tokio::sync::mpsc;
 use windows::ApplicationModel::AppInfo;
 use windows::Foundation::TypedEventHandler;
@@ -40,15 +40,13 @@ static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock:
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
-    jni_callback: impl Fn(JniCallback) + Send + Sync + 'static,
+    jni_callback: impl Fn(JniCallback) + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (incoming_tx, mut incoming_rx) = mpsc::channel(10);
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(incoming_tx);
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
     OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx).unwrap();
-
-    let jni_callback_arc = Arc::new(jni_callback);
 
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
 
@@ -135,17 +133,16 @@ pub async fn listener(
 
     let outgoing_events = async {
         while let Some(event) = outgoing_rx.recv().await {
-            jni_callback_arc(event);
+            jni_callback(event);
         }
 
         Ok(())
     };
 
     // other listeners
-    let jni_callback = jni_callback_arc.clone();
     let ipc_commands = ipc::commands_listener(move |command: String, arg: String| {
         let event = JniCallback::IpcCallback(command, arg);
-        jni_callback(event);
+        let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(event);
     });
 
     tokio::try_join!(session_events, ipc_commands, outgoing_events)?;

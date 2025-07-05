@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashMap, str::FromStr, sync::OnceLock, time::Duration};
 
 use futures_util::{TryFutureExt, stream::StreamExt};
 use tokio::{
@@ -44,17 +44,17 @@ async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
     }
 }
 
-type JniCallbackArc = Arc<dyn Fn(JniCallback) + Send + Sync + 'static>;
+static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::new();
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
-    jni_callback: impl Fn(JniCallback) + Send + Sync + 'static,
+    jni_callback: impl Fn(JniCallback) + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (all_players_tx, mut all_players_rx) = mpsc::channel(100);
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(all_players_tx);
 
-    let jni_callback_arc = Arc::new(jni_callback);
-    let jni_callback2 = jni_callback_arc.clone();
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
+    OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx.clone()).unwrap();
 
     let names_to_handles: RwLock<HashMap<String, PlayerListenerHandle>> =
         RwLock::new(HashMap::new());
@@ -88,7 +88,6 @@ pub async fn listener(
                     &connection,
                     dbus_name.to_string(),
                     &mut names_to_handles.write().await,
-                    jni_callback_arc.clone(),
                 );
             }
         }
@@ -97,7 +96,6 @@ pub async fn listener(
     let active_players = dbus_names_to_identities.read().await.clone();
     let normalized_active_players = normalize_active_players(&active_players);
 
-    let jni_callback = jni_callback_arc.clone();
     jni_callback(JniCallback::SessionsChanged(normalized_active_players));
 
     // listen for new players
@@ -147,7 +145,6 @@ pub async fn listener(
                                 &connection,
                                 app_id.to_string(),
                                 &mut names_to_handles.write().await,
-                                jni_callback_arc.clone(),
                             );
                         }
 
@@ -199,7 +196,6 @@ pub async fn listener(
                         &connection,
                         dbus_name.to_string(),
                         &mut names_to_handles.write().await,
-                        jni_callback_arc.clone(),
                     );
                 }
             }
@@ -217,29 +213,36 @@ pub async fn listener(
 
             let active_players = dbus_names_to_identities.read().await.clone();
             let normalized_active_players = normalize_active_players(&active_players);
-            jni_callback2(JniCallback::SessionsChanged(normalized_active_players));
+            let _ = OUTGOING_PLAYER_EVENT_TX
+                .get()
+                .unwrap()
+                .try_send(JniCallback::SessionsChanged(normalized_active_players));
         }
         Ok::<(), zbus::Error>(())
     };
 
     // other listeners
-    let jni_callback = jni_callback_arc.clone();
     let ipc_commands = ipc::commands_listener(move |command: String, arg: String| {
         let event = JniCallback::IpcCallback(command, arg);
-        jni_callback(event);
+        let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(event);
     });
 
-    let jni_callback = jni_callback_arc.clone();
-    let tray = tray::tray_listener(move |id| {
-        let event = JniCallback::TrayItemClicked(id);
-        jni_callback(event);
-    });
+    let tray = tray::tray_listener(outgoing_tx);
+
+    let outgoing_events = async {
+        while let Some(event) = outgoing_rx.recv().await {
+            jni_callback(event);
+        }
+
+        Ok(())
+    };
 
     tokio::try_join!(
         incoming_events.map_err(Into::into),
         mpris_events.map_err(Into::into),
         ipc_commands,
-        tray
+        tray,
+        outgoing_events
     )?;
 
     Ok(())
@@ -249,7 +252,6 @@ async fn player_listeners(
     connection: Connection,
     app_id: String,
     mut incoming_player_event_rx: Receiver<IncomingPlayerEvent>,
-    jni_callback: JniCallbackArc,
 ) -> zbus::Result<()> {
     let player_proxy = PlayerProxy::builder(&connection)
         .uncached_properties(&["Position"])
@@ -266,10 +268,13 @@ async fn player_listeners(
     let metadata = player_proxy.metadata().await.unwrap_or_default();
     let metadata_event = parse_metadata(metadata);
 
-    jni_callback(JniCallback::MetadataChanged(
-        app_id_normalized.clone(),
-        metadata_event,
-    ));
+    let _ = OUTGOING_PLAYER_EVENT_TX
+        .get()
+        .unwrap()
+        .try_send(JniCallback::MetadataChanged(
+            app_id_normalized.clone(),
+            metadata_event,
+        ));
 
     let playback_status = player_proxy.playback_status().await.unwrap_or_default();
     let can_go_next = player_proxy.can_go_next().await.unwrap_or_default();
@@ -280,10 +285,13 @@ async fn player_listeners(
         .unwrap_or(-1);
     let playback_event = parse_playback_state(playback_status, can_go_next, position);
 
-    jni_callback(JniCallback::PlaybackStateChanged(
-        app_id_normalized.clone(),
-        playback_event,
-    ));
+    let _ = OUTGOING_PLAYER_EVENT_TX
+        .get()
+        .unwrap()
+        .try_send(JniCallback::PlaybackStateChanged(
+            app_id_normalized.clone(),
+            playback_event,
+        ));
 
     let mut metadata_changed = player_proxy.receive_metadata_changed().await;
     let mut playback_status_changed = player_proxy.receive_playback_status_changed().await;
@@ -296,10 +304,13 @@ async fn player_listeners(
         while let Some(metadata_changed) = metadata_changed.next().await {
             let metadata = metadata_changed.get().await.unwrap_or_default();
             let metadata_event = parse_metadata(metadata);
-            jni_callback(JniCallback::MetadataChanged(
-                app_id_normalized.clone(),
-                metadata_event,
-            ));
+            let _ = OUTGOING_PLAYER_EVENT_TX
+                .get()
+                .unwrap()
+                .try_send(JniCallback::MetadataChanged(
+                    app_id_normalized.clone(),
+                    metadata_event,
+                ));
         }
 
         zbus::Result::Ok(())
@@ -321,10 +332,9 @@ async fn player_listeners(
                     .unwrap_or_default(),
                 position,
             );
-            jni_callback(JniCallback::PlaybackStateChanged(
-                app_id_normalized.clone(),
-                playback_event,
-            ));
+            let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
+                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+            );
         }
         zbus::Result::Ok(())
     };
@@ -345,10 +355,9 @@ async fn player_listeners(
                 can_go_next,
                 position,
             );
-            jni_callback(JniCallback::PlaybackStateChanged(
-                app_id_normalized.clone(),
-                playback_event,
-            ));
+            let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
+                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+            );
         }
         zbus::Result::Ok(())
     };
@@ -369,10 +378,12 @@ async fn player_listeners(
                             .unwrap_or_default(),
                         position,
                     );
-                    jni_callback(JniCallback::PlaybackStateChanged(
-                        app_id_normalized.clone(),
-                        playback_event,
-                    ));
+                    let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
+                        JniCallback::PlaybackStateChanged(
+                            app_id_normalized.clone(),
+                            playback_event,
+                        ),
+                    );
                 }
             }
         }
@@ -417,16 +428,10 @@ fn start_tracking_player(
     connection: &Connection,
     app_id: String,
     names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
-    jni_callback_arc: JniCallbackArc,
 ) {
     let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
 
-    let join_handle = tokio::spawn(player_listeners(
-        connection.clone(),
-        app_id.clone(),
-        rx,
-        jni_callback_arc,
-    ));
+    let join_handle = tokio::spawn(player_listeners(connection.clone(), app_id.clone(), rx));
 
     names_to_handles.insert(
         app_id,
