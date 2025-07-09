@@ -15,7 +15,7 @@ interprocess = { version = "2.2", features = ["tokio"] }
 # discord-presence = { version = "1.4", features = ["activity_type"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.7", default-features = false, features = ["async-io"] }
+zbus = { version = "5.8", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
 nix = { version = "0.30", default-features = false, features = ["fs"] }
@@ -23,6 +23,7 @@ nix = { version = "0.30", default-features = false, features = ["fs"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [
     "Media_Control",
+    "Storage_Streams",
     "Foundation_Collections",
     "ApplicationModel",
     "Win32_Graphics_Dwm",

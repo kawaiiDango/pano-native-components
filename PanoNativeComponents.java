@@ -12,6 +12,8 @@ public class PanoNativeComponents {
 
     static native void setAllowedAppIds(String[] appIds);
 
+    static native void albumArtEnabled(boolean enabled);
+
     static native void stopListeningMedia();
 
     static native void skip(String appId);
@@ -29,6 +31,8 @@ public class PanoNativeComponents {
     static native void applyDarkModeToWindow(long handle);
 
     static native boolean sendIpcCommand(String command, String arg);
+
+    static native boolean isFileLocked(String path);
 
     static native String getSystemLocale();
 
@@ -69,6 +73,8 @@ public class PanoNativeComponents {
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
+
+                albumArtEnabled(true);
 
                 // test tray icon
                 String menuItemIds[] = new String[] { "1", "2", "3", "Separator", "4" };
@@ -116,8 +122,8 @@ public class PanoNativeComponents {
         }
     }
 
-    public static void onMetadataChanged(String appId, String title, String artist, String album, String albumArtist, int trackNumber, long duration) {
-        System.out.println("onMetadataChanged: " + appId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration);
+    public static void onMetadataChanged(String appId, String title, String artist, String album, String albumArtist, int trackNumber, long duration, String artUrl, byte[] artBytes) {
+        System.out.println("onMetadataChanged: " + appId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration + ", " + artUrl + ", " + (artBytes != null ? artBytes.length : 0) + " bytes");
     }
 
     public static void onPlaybackStateChanged(String appId, String state, long position, boolean canSkip) {

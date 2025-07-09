@@ -99,8 +99,14 @@ pub async fn tray_listener(
             tray_init_attempted = true;
 
             let tray = PanoTray { data: tray_data };
-            let handle = tray.spawn().await?;
-            let _ = tray_handle.set(handle);
+            match tray.spawn().await {
+                Ok(handle) => {
+                    let _ = tray_handle.set(handle);
+                }
+                Err(e) => {
+                    eprintln!("Failed to spawn tray: {e}");
+                }
+            }
         } else if let Some(handle) = tray_handle.get() {
             handle
                 .update(|existing_tray| {

@@ -94,6 +94,15 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
     send_incoming_player_event(IncomingPlayerEvent::RefreshSessions);
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_albumArtEnabled(
+    _env: JNIEnv,
+    _class: JClass,
+    enabled: jboolean,
+) {
+    send_incoming_player_event(IncomingPlayerEvent::AlbumArtToggled(enabled != 0));
+}
+
 pub fn is_app_allowed(app_id: &str) -> bool {
     APP_IDS_ALLOW_LIST.lock().unwrap().contains(app_id)
 }
@@ -295,6 +304,32 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isFileLocked(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) -> jboolean {
+    #[cfg(target_os = "windows")]
+    {
+        let path: String = env
+            .get_string(&path)
+            .expect("Couldn't get java string!")
+            .into();
+
+        if windows_utils::is_file_locked(&path) {
+            1 // true
+        } else {
+            0 // false
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getSystemLocale<'a>(
     env: JNIEnv<'a>,
     _class: JClass<'a>,
@@ -442,6 +477,8 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
                 album_artist,
                 track_number,
                 duration,
+                art_url,
+                art_bytes,
             },
         ) => {
             let app_id = env.new_string(app_id).unwrap();
@@ -451,11 +488,13 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
             let album_artist = env.new_string(album_artist).unwrap();
             let track_number = *track_number as jint;
             let duration = *duration as jlong;
+            let art_url = env.new_string(art_url).unwrap();
+            let art_bytes = env.byte_array_from_slice(art_bytes).unwrap();
             env.call_static_method(
                     "com/arn/scrobble/PanoNativeComponents",
                     "onMetadataChanged",
-                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJ)V",
-                    &[(&app_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into()],
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLjava/lang/String;[B)V",
+                    &[(&app_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into(), (&art_url).into(), (&art_bytes).into()],
                 )
         }
         JniCallback::PlaybackStateChanged(

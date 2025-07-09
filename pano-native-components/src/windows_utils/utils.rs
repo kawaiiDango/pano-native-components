@@ -1,3 +1,6 @@
+use std::fs::OpenOptions;
+use std::os::windows::fs::OpenOptionsExt;
+
 use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Globalization::{
     GetLocaleInfoEx, GetUserDefaultLocaleName, LOCALE_SISO639LANGNAME, LOCALE_SISO3166CTRYNAME,
@@ -116,5 +119,22 @@ pub fn get_language_country_codes() -> Result<(String, String), Box<dyn std::err
         let country = String::from_utf16_lossy(&country_buffer[..country_result as usize - 1]);
 
         Ok((language, country))
+    }
+}
+
+pub fn is_file_locked(path: &str) -> bool {
+    let file = OpenOptions::new()
+        .create_new(false)
+        .write(false)
+        .read(true)
+        .share_mode(0)
+        .open(path);
+
+    match file {
+        Ok(_) => false,
+        Err(err) => {
+            // eprintln!("Error opening file '{path}': {err}");
+            err.raw_os_error() == Some(32) // ERROR_SHARING_VIOLATION
+        }
     }
 }

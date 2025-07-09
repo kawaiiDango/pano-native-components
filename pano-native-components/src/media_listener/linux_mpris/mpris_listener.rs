@@ -1,4 +1,9 @@
-use std::{collections::HashMap, str::FromStr, sync::OnceLock, time::Duration};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{LazyLock, Mutex, OnceLock},
+    time::Duration,
+};
 
 use futures_util::{TryFutureExt, stream::StreamExt};
 use tokio::{
@@ -45,6 +50,8 @@ async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
 }
 
 static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::new();
+
+static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
@@ -152,6 +159,11 @@ pub async fn listener(
                             stop_tracking_player(names_to_handles.write().await.remove(app_id));
                         }
                     }
+                }
+
+                IncomingPlayerEvent::AlbumArtToggled(enabled) => {
+                    let mut album_art_enabled = ALBUM_ART_ENABLED.lock().unwrap();
+                    *album_art_enabled = *enabled;
                 }
 
                 IncomingPlayerEvent::Shutdown => {
@@ -406,6 +418,9 @@ async fn player_listeners(
                 IncomingPlayerEvent::RefreshSessions => {
                     // do nothing, handled by the main listener
                 }
+                IncomingPlayerEvent::AlbumArtToggled(_) => {
+                    // do nothing, handled by the main listener
+                }
                 IncomingPlayerEvent::Shutdown => break,
             }
         }
@@ -459,11 +474,6 @@ fn normalize_dbus_name(app_id: &str) -> String {
 }
 
 fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataInfo {
-    // debug print
-    // for (key, value) in &metadata {
-    //     println!("  {}: {:?}", key, value);
-    // }
-
     let metadata = Metadata::from(metadata);
 
     let first_artist = metadata.artists().unwrap_or_default().first().cloned();
@@ -472,6 +482,20 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
         .unwrap_or_default()
         .first()
         .cloned();
+
+    let art_url = metadata.art_url();
+
+    let art_url = if *ALBUM_ART_ENABLED.lock().unwrap()
+        && let Some(art_url) = art_url
+    {
+        if art_url.len() < 1000 {
+            Some(art_url.to_string())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     MetadataInfo {
         title: metadata.title().unwrap_or_default().to_string(),
@@ -483,6 +507,8 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
             .length()
             .map(|x| x.as_millis() as i64)
             .unwrap_or(-1),
+        art_url: art_url.unwrap_or_default(),
+        art_bytes: Vec::new(), // not used on linux
     }
 }
 

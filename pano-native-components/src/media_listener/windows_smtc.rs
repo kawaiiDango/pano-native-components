@@ -12,6 +12,9 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus, MediaPropertiesChangedEventArgs,
     PlaybackInfoChangedEventArgs, SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
 };
+use windows::Storage::Streams::{
+    Buffer, DataReader, IRandomAccessStreamWithContentType, InputStreamOptions,
+};
 
 static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -24,6 +27,10 @@ static APP_NAMES_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
 
 static PREV_APP_IDS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
+
+static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+const MAX_ART_BYTES: usize = 1024 * 1024; // 1 MB
 
 struct CallbackTokens {
     playback_info_changed: i64,
@@ -89,6 +96,10 @@ pub async fn listener(
                 }
                 IncomingPlayerEvent::RefreshSessions => {
                     update_sessions(&manager);
+                }
+
+                IncomingPlayerEvent::AlbumArtToggled(enabled) => {
+                    *ALBUM_ART_ENABLED.lock().unwrap() = enabled;
                 }
 
                 IncomingPlayerEvent::Shutdown => {
@@ -376,6 +387,28 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
     }
 }
 
+fn read_stream_to_vec(
+    stream: &IRandomAccessStreamWithContentType,
+) -> windows::core::Result<Vec<u8>> {
+    let size = stream.Size()? as u32;
+
+    if size > MAX_ART_BYTES.try_into().unwrap() {
+        eprintln!("Stream size exceeds maximum allowed size");
+        return Ok(vec![]);
+    }
+
+    let buffer = Buffer::Create(size)?;
+    let input_stream = stream.CloneStream()?;
+    let read_op = input_stream.ReadAsync(&buffer, size, InputStreamOptions::None)?;
+    let buffer = read_op.get()?;
+
+    // Use DataReader to read bytes from the buffer
+    let data_reader = DataReader::FromBuffer(&buffer)?;
+    let mut data = vec![0u8; buffer.Length()? as usize];
+    data_reader.ReadBytes(&mut data)?;
+    Ok(data)
+}
+
 fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsSession) {
     let media_properties = session
         .TryGetMediaPropertiesAsync()
@@ -398,6 +431,26 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             .unwrap_or_default()
             .to_string();
         let track_number = media_properties.TrackNumber().unwrap_or_default();
+
+        let thumbnail = if *ALBUM_ART_ENABLED.lock().unwrap()
+            && let Ok(thumbnail) = media_properties.Thumbnail()
+        {
+            let read_async = thumbnail.OpenReadAsync();
+            if let Ok(read_async) = read_async {
+                if let Ok(stream) = read_async.get() {
+                    read_stream_to_vec(&stream)
+                        .map(Some)
+                        .unwrap_or_else(|_| None)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // let genres = media_properties
         //     .Genres()
         //     .map(|x| x.GetAt(0).unwrap_or_default().to_string())
@@ -421,6 +474,8 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             album_artist,
             track_number,
             duration: existing_duration, // this will be updated later from timeline properties
+            art_url: String::new(),      // not used in windows
+            art_bytes: thumbnail.unwrap_or_default(),
         };
 
         cache.insert(app_id.clone(), metadata_info.clone());
