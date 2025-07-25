@@ -468,6 +468,7 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
         let existing_duration = cache.get(&app_id).map(|x| x.duration).unwrap_or(-1);
 
         let metadata_info = MetadataInfo {
+            track_id: "".to_string(), // track_id is not available in SMTC
             title,
             artist,
             album,

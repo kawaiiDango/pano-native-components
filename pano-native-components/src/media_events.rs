@@ -2,6 +2,7 @@ use strum::EnumString;
 
 #[derive(Debug, Clone)]
 pub struct MetadataInfo {
+    pub track_id: String,
     pub title: String,
     pub artist: String,
     pub album: String,

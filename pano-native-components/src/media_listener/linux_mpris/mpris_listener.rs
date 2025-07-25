@@ -498,6 +498,7 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
     };
 
     MetadataInfo {
+        track_id: metadata.track_id().unwrap_or_default().to_string(),
         title: metadata.title().unwrap_or_default().to_string(),
         artist: first_artist.unwrap_or_default(),
         album: metadata.album_name().unwrap_or_default().to_string(),

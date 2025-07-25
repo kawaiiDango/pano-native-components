@@ -93,6 +93,8 @@ public class PanoNativeComponents {
                             "MusicBee.exe",
                             "foobar2000.exe",
                             "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App",
+                            "com.squirrel.TIDAL.TIDAL",
+                            "com.deezer.deezer-desktop",
                             "org.mpris.MediaPlayer2.Lollypop",
                             "org.mpris.MediaPlayer2.elisa",
                             "org.mpris.MediaPlayer2.plasma-browser-integration",
@@ -122,8 +124,8 @@ public class PanoNativeComponents {
         }
     }
 
-    public static void onMetadataChanged(String appId, String title, String artist, String album, String albumArtist, int trackNumber, long duration, String artUrl, byte[] artBytes) {
-        System.out.println("onMetadataChanged: " + appId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration + ", " + artUrl + ", " + (artBytes != null ? artBytes.length : 0) + " bytes");
+    public static void onMetadataChanged(String appId, String trackId, String title, String artist, String album, String albumArtist, int trackNumber, long duration, String artUrl, byte[] artBytes) {
+        System.out.println("onMetadataChanged: " + appId + ", " + trackId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration + ", " + artUrl + ", " + (artBytes != null ? artBytes.length : 0) + " bytes");
     }
 
     public static void onPlaybackStateChanged(String appId, String state, long position, boolean canSkip) {
