@@ -1,7 +1,7 @@
 #!/bin/bash
 
 cargo build --release
-if [ "$(arch)" = "aarch64" ]; then
+if [ "$(uname -m)" = "aarch64" ]; then
     resourcesDirName="linux-arm64"
 else
     resourcesDirName="linux-x64"
