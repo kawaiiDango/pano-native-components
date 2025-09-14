@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
+    env,
     str::FromStr,
     sync::{LazyLock, Mutex, OnceLock},
     time::Duration,
 };
 
 use futures_util::{TryFutureExt, stream::StreamExt};
+use notify_rust::{Hint, Notification, Urgency};
 use tokio::{
     sync::{
         RwLock, RwLockWriteGuard,
@@ -21,9 +23,9 @@ use zbus::{
 };
 
 use crate::{
-    INCOMING_PLAYER_EVENT_TX, ipc, is_app_allowed,
+    INCOMING_PLAYER_EVENT_TX, file_picker, ipc, is_app_allowed,
     jni_callback::JniCallback,
-    media_events::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState},
+    media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
 };
 use crate::{media_listener::linux_mpris::metadata::Metadata, tray};
@@ -32,7 +34,7 @@ const MPRIS2_PREFIX: &str = "org.mpris.MediaPlayer2.";
 
 struct PlayerListenerHandle {
     join_handle: JoinHandle<zbus::Result<()>>,
-    incoming_player_event_tx: Sender<IncomingPlayerEvent>,
+    incoming_player_event_tx: Sender<IncomingEvent>,
 }
 
 async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
@@ -111,7 +113,7 @@ pub async fn listener(
     let incoming_events = async {
         while let Some(incoming_event) = all_players_rx.recv().await {
             match &incoming_event {
-                IncomingPlayerEvent::Skip(app_id) => {
+                IncomingEvent::Skip(app_id) => {
                     let names_to_handles = names_to_handles.read().await;
                     let handle = names_to_handles.get(app_id);
 
@@ -120,7 +122,7 @@ pub async fn listener(
                     }
                 }
 
-                IncomingPlayerEvent::Mute(app_id) => {
+                IncomingEvent::Mute(app_id) => {
                     let names_to_handles = names_to_handles.read().await;
                     let handle = names_to_handles.get(app_id);
 
@@ -129,7 +131,7 @@ pub async fn listener(
                     }
                 }
 
-                IncomingPlayerEvent::Unmute(app_id) => {
+                IncomingEvent::Unmute(app_id) => {
                     let names_to_handles = names_to_handles.read().await;
                     let handle = names_to_handles.get(app_id);
 
@@ -138,7 +140,7 @@ pub async fn listener(
                     }
                 }
 
-                IncomingPlayerEvent::RefreshSessions => {
+                IncomingEvent::RefreshSessions => {
                     for (app_id, _app_name) in dbus_names_to_identities.read().await.iter() {
                         let app_id_normalized = normalize_dbus_name(app_id);
                         let is_allowed = is_app_allowed(&app_id_normalized);
@@ -161,12 +163,12 @@ pub async fn listener(
                     }
                 }
 
-                IncomingPlayerEvent::AlbumArtToggled(enabled) => {
+                IncomingEvent::AlbumArtToggled(enabled) => {
                     let mut album_art_enabled = ALBUM_ART_ENABLED.lock().unwrap();
                     *album_art_enabled = *enabled;
                 }
 
-                IncomingPlayerEvent::Shutdown => {
+                IncomingEvent::Shutdown => {
                     for (_app_id, handle) in names_to_handles.write().await.drain() {
                         stop_tracking_player(Some(handle));
                     }
@@ -175,6 +177,45 @@ pub async fn listener(
 
                     // produce some error to stop the tasks
                     return zbus::Result::Err(zbus::Error::Unsupported);
+                }
+
+                IncomingEvent::LaunchFilePicker(request_id, save, title, file_name, filters) => {
+                    let uri = file_picker::launch_file_picker(
+                        *save,
+                        title.clone(),
+                        file_name.clone(),
+                        filters.clone(),
+                    )
+                    .await;
+                    let _ = OUTGOING_PLAYER_EVENT_TX
+                        .get()
+                        .unwrap()
+                        .try_send(JniCallback::FilePicked(*request_id, uri));
+                }
+
+                IncomingEvent::Notification(title, body) => {
+                    let mut notification = Notification::new();
+
+                    notification
+                        .appname("Pano Scrobbler")
+                        .summary(title)
+                        .body(body)
+                        .timeout(10000)
+                        .urgency(Urgency::Normal);
+
+                    if env::var("APPDIR").is_ok() {
+                        notification.auto_icon();
+                        // icon for appimage is at $APPDIR/pano-scrobbler.svg
+                        // notification
+                        //     .icon(&format!("{app_dir}/pano-scrobbler.svg"))
+                        //     .appname("pano-scrobbler");
+                    } else {
+                        notification.hint(Hint::DesktopEntry("pano-scrobbler".to_string()));
+                    }
+
+                    if let Err(e) = notification.show_async().await {
+                        eprintln!("Error showing notification: {e:?}");
+                    }
                 }
             }
         }
@@ -263,7 +304,7 @@ pub async fn listener(
 async fn player_listeners(
     connection: Connection,
     app_id: String,
-    mut incoming_player_event_rx: Receiver<IncomingPlayerEvent>,
+    mut incoming_player_event_rx: Receiver<IncomingEvent>,
 ) -> zbus::Result<()> {
     let player_proxy = PlayerProxy::builder(&connection)
         .uncached_properties(&["Position"])
@@ -405,23 +446,20 @@ async fn player_listeners(
     let incoming_events_listener = async {
         while let Some(incoming_event) = incoming_player_event_rx.recv().await {
             match &incoming_event {
-                IncomingPlayerEvent::Skip(_) => {
+                IncomingEvent::Skip(_) => {
                     let _ = player_proxy.next().await;
                 }
-                IncomingPlayerEvent::Mute(_) => {
+                IncomingEvent::Mute(_) => {
                     prev_volume = player_proxy.volume().await.unwrap_or_default();
                     let _ = player_proxy.set_volume(0.0).await;
                 }
-                IncomingPlayerEvent::Unmute(_) => {
+                IncomingEvent::Unmute(_) => {
                     let _ = player_proxy.set_volume(prev_volume).await;
                 }
-                IncomingPlayerEvent::RefreshSessions => {
+                IncomingEvent::Shutdown => break,
+                _ => {
                     // do nothing, handled by the main listener
                 }
-                IncomingPlayerEvent::AlbumArtToggled(_) => {
-                    // do nothing, handled by the main listener
-                }
-                IncomingPlayerEvent::Shutdown => break,
             }
         }
 
@@ -444,7 +482,7 @@ fn start_tracking_player(
     app_id: String,
     names_to_handles: &mut RwLockWriteGuard<'_, HashMap<String, PlayerListenerHandle>>,
 ) {
-    let (tx, rx) = mpsc::channel::<IncomingPlayerEvent>(1);
+    let (tx, rx) = mpsc::channel::<IncomingEvent>(1);
 
     let join_handle = tokio::spawn(player_listeners(connection.clone(), app_id.clone(), rx));
 
@@ -483,19 +521,7 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
         .first()
         .cloned();
 
-    let art_url = metadata.art_url();
-
-    let art_url = if *ALBUM_ART_ENABLED.lock().unwrap()
-        && let Some(art_url) = art_url
-    {
-        if art_url.len() < 1000 {
-            Some(art_url.to_string())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let art_url = metadata.art_url().take_if(|x| x.len() < 1000);
 
     MetadataInfo {
         track_id: metadata.track_id().unwrap_or_default().to_string(),
@@ -506,9 +532,9 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
         track_number: metadata.track_number().unwrap_or_default(),
         duration: metadata
             .length()
-            .map(|x| x.as_millis() as i64)
+            .map(|x| x.as_millis().try_into().unwrap_or(-1))
             .unwrap_or(-1),
-        art_url: art_url.unwrap_or_default(),
+        art_url: art_url.unwrap_or_default().to_string(),
         art_bytes: Vec::new(), // not used on linux
     }
 }

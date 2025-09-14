@@ -2,11 +2,6 @@
 
 A JNI lib, used for accessing some native APIs on desktop, that are not possible with JVM.
 
-
-This project was compiled with rust nightly.
-It may use features that are not available in rust stable.
-
-
 ### Build
 
 ```

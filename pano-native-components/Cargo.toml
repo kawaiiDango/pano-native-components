@@ -12,36 +12,24 @@ jni = "0.21"
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.46", features = ["rt", "sync", "macros", "time"] }
 interprocess = { version = "2.2", features = ["tokio"] }
-# discord-rich-presence = { git = "https://github.com/kawaiiDango/discord-rich-presence.git" }
+discord-rich-presence = "1.0.0"
+notify-rust = "4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.8", default-features = false, features = ["async-io"] }
+zbus = { version = "5.10", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
 nix = { version = "0.30", default-features = false, features = ["fs"] }
+ashpd = "0.12"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Media_Control",
     "Storage_Streams",
     "Foundation_Collections",
     "ApplicationModel",
     "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
+    "Win32_Globalization",
 ] }
-windows-registry = "0.5"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-dispatch2 = "0.3"
-objc2-foundation = { version = "0.3", features = [
-    "NSDictionary",
-    "NSString",
-    "NSValue",
-] }
-block2 = "0.6"
-core-foundation = "0.10"
-core-services = "1.0.0"
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-notify-rust = "4"
+windows-registry = "0.6"

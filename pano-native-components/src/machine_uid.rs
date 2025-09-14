@@ -11,7 +11,6 @@ pub mod machine_id {
     // or when not found (e.g. Fedora 20)
     const DBUS_PATH_ETC: &str = "/etc/machine-id";
 
-    #[allow(dead_code)]
     fn read_file(file_path: &str) -> Result<String, Box<dyn Error>> {
         let mut fd = File::open(file_path)?;
         let mut content = String::new();
@@ -25,36 +24,6 @@ pub mod machine_id {
             Ok(machine_id) => Ok(machine_id),
             Err(_) => Ok(read_file(DBUS_PATH_ETC)?),
         }
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod machine_id {
-    // machineID returns the uuid returned by `ioreg -rd1 -c IOPlatformExpertDevice`.
-    use std::error::Error;
-    use std::process::Command;
-
-    /// Return machine id
-    pub fn get_machine_id() -> Result<String, Box<dyn Error>> {
-        let output = Command::new("ioreg")
-            .args(&["-rd1", "-c", "IOPlatformExpertDevice"])
-            .output()?;
-        let content = String::from_utf8_lossy(&output.stdout);
-        extract_id(&content)
-    }
-
-    fn extract_id(content: &str) -> Result<String, Box<dyn Error>> {
-        let lines = content.split('\n');
-        for line in lines {
-            if line.contains("IOPlatformUUID") {
-                let k: Vec<&str> = line.rsplitn(2, '=').collect();
-                let id = k[0].trim_matches(|c: char| c == '"' || c.is_whitespace());
-                return Ok(id.to_string());
-            }
-        }
-        Err(From::from(
-            "No matching IOPlatformUUID in `ioreg -rd1 -c IOPlatformExpertDevice` command.",
-        ))
     }
 }
 

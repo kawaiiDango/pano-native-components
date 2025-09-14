@@ -1,7 +1,8 @@
 use crate::ipc;
 use crate::jni_callback::JniCallback;
-use crate::media_events::{IncomingPlayerEvent, MetadataInfo, PlaybackInfo, PlaybackState};
+use crate::media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState};
 use crate::{INCOMING_PLAYER_EVENT_TX, is_app_allowed};
+use notify_rust::Notification;
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use tokio::sync::mpsc;
@@ -55,7 +56,7 @@ pub async fn listener(
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
     OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx).unwrap();
 
-    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
+    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.join()?;
 
     let sessions_changed_token = manager
         .SessionsChanged(&TypedEventHandler::<
@@ -80,7 +81,7 @@ pub async fn listener(
     let session_events = async {
         while let Some(event) = incoming_rx.recv().await {
             match event {
-                IncomingPlayerEvent::Skip(app_id) => {
+                IncomingEvent::Skip(app_id) => {
                     for session in manager.GetSessions().unwrap().into_iter() {
                         let session_app_id = session
                             .SourceAppUserModelId()
@@ -94,15 +95,15 @@ pub async fn listener(
                         }
                     }
                 }
-                IncomingPlayerEvent::RefreshSessions => {
+                IncomingEvent::RefreshSessions => {
                     update_sessions(&manager);
                 }
 
-                IncomingPlayerEvent::AlbumArtToggled(enabled) => {
+                IncomingEvent::AlbumArtToggled(enabled) => {
                     *ALBUM_ART_ENABLED.lock().unwrap() = enabled;
                 }
 
-                IncomingPlayerEvent::Shutdown => {
+                IncomingEvent::Shutdown => {
                     INCOMING_PLAYER_EVENT_TX.lock().unwrap().take();
 
                     let mut callback_tokens_map = CALLBACK_TOKENS_MAP.lock().unwrap();
@@ -135,6 +136,23 @@ pub async fn listener(
 
                     break;
                 }
+
+                IncomingEvent::Notification(title, body) => {
+                    let mut notification = Notification::new();
+
+                    const AUMID: &str = "com.arn.scrobble";
+
+                    notification
+                        .summary(&title)
+                        .body(&body)
+                        .timeout(10000)
+                        .app_id(AUMID);
+
+                    if let Err(e) = notification.show() {
+                        eprintln!("Error showing notification: {e:?}");
+                    }
+                }
+
                 _ => {}
             }
         }
@@ -400,7 +418,7 @@ fn read_stream_to_vec(
     let buffer = Buffer::Create(size)?;
     let input_stream = stream.CloneStream()?;
     let read_op = input_stream.ReadAsync(&buffer, size, InputStreamOptions::None)?;
-    let buffer = read_op.get()?;
+    let buffer = read_op.join()?;
 
     // Use DataReader to read bytes from the buffer
     let data_reader = DataReader::FromBuffer(&buffer)?;
@@ -414,7 +432,7 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
         .TryGetMediaPropertiesAsync()
         .expect("TryGetMediaPropertiesAsync failed");
 
-    if let Ok(media_properties) = media_properties.get() {
+    if let Ok(media_properties) = media_properties.join() {
         let app_id = session
             .SourceAppUserModelId()
             .expect("Failed to get session ID")
@@ -437,7 +455,7 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
         {
             let read_async = thumbnail.OpenReadAsync();
             if let Ok(read_async) = read_async {
-                if let Ok(stream) = read_async.get() {
+                if let Ok(stream) = read_async.join() {
                     read_stream_to_vec(&stream)
                         .map(Some)
                         .unwrap_or_else(|_| None)

@@ -22,7 +22,7 @@ public class PanoNativeComponents {
 
     static native void unmute(String appId);
 
-    static native void notify(String title, String body, String iconPath);
+    static native void notify(String title, String body);
 
     static native void setTray(String tooltip, int[] argb, int icon_size, String[] menuItemIds, String[] menuItemTexts);
 
@@ -35,6 +35,16 @@ public class PanoNativeComponents {
     static native boolean isFileLocked(String path);
 
     static native String getSystemLocale();
+
+    static native void xdgFileChooser(int requestId, boolean save, String title, String fileName, String[] filters);
+
+    static native void onFilePicked(int requestId, String uri);
+
+    static native boolean updateDiscordActivity(String clientId, String state, String details, String largeText, long startTime, long endTime, String artUrl, boolean isPlaying, boolean statusIsState);
+
+    static native boolean clearDiscordActivity();
+
+    static native boolean stopDiscordActivity();
 
     static {
         System.loadLibrary("pano_native_components");
@@ -73,6 +83,8 @@ public class PanoNativeComponents {
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
+
+                PanoNativeComponents.notify("Test Notification", "This is a test notification");
 
                 albumArtEnabled(true);
 

@@ -2,11 +2,12 @@ mod machine_uid;
 mod media_events;
 mod media_listener;
 
-#[cfg(not(target_os = "macos"))]
-mod notifications;
+#[cfg(target_os = "linux")]
+mod file_picker;
 #[cfg(target_os = "linux")]
 mod tray;
 
+mod discord;
 mod ipc;
 mod jni_callback;
 mod windows_utils;
@@ -17,7 +18,7 @@ use jni::JNIEnv;
 use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString};
 
 use jni_callback::JniCallback;
-use media_events::IncomingPlayerEvent;
+use media_events::IncomingEvent;
 use media_listener::listener;
 use tokio::sync::mpsc;
 
@@ -25,9 +26,10 @@ use std::collections::HashSet;
 use std::env;
 use std::sync::{LazyLock, Mutex};
 
+use crate::discord::DiscordActivity;
 use crate::media_events::{MetadataInfo, PlaybackInfo};
 
-static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingPlayerEvent>>>> =
+static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -91,7 +93,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
     }
 
     *APP_IDS_ALLOW_LIST.lock().unwrap() = new_allow_list;
-    send_incoming_player_event(IncomingPlayerEvent::RefreshSessions);
+    send_incoming_event(IncomingEvent::RefreshSessions);
 }
 
 #[unsafe(no_mangle)]
@@ -100,7 +102,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_albumArtEnable
     _class: JClass,
     enabled: jboolean,
 ) {
-    send_incoming_player_event(IncomingPlayerEvent::AlbumArtToggled(enabled != 0));
+    send_incoming_event(IncomingEvent::AlbumArtToggled(enabled != 0));
 }
 
 pub fn is_app_allowed(app_id: &str) -> bool {
@@ -112,7 +114,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopListeningM
     _env: JNIEnv,
     _class: JClass,
 ) {
-    send_incoming_player_event(IncomingPlayerEvent::Shutdown);
+    send_incoming_event(IncomingEvent::Shutdown);
 }
 
 #[unsafe(no_mangle)]
@@ -140,7 +142,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_skip(
         .expect("Couldn't get java string!")
         .into();
 
-    send_incoming_player_event(IncomingPlayerEvent::Skip(app_id));
+    send_incoming_event(IncomingEvent::Skip(app_id));
 }
 
 #[unsafe(no_mangle)]
@@ -154,7 +156,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_mute(
         .expect("Couldn't get java string!")
         .into();
 
-    send_incoming_player_event(IncomingPlayerEvent::Mute(app_id));
+    send_incoming_event(IncomingEvent::Mute(app_id));
 }
 
 #[unsafe(no_mangle)]
@@ -167,7 +169,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_unmute(
         .get_string(&app_id)
         .expect("Couldn't get java string!")
         .into();
-    send_incoming_player_event(IncomingPlayerEvent::Unmute(app_id));
+    send_incoming_event(IncomingEvent::Unmute(app_id));
 }
 
 #[unsafe(no_mangle)]
@@ -176,16 +178,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_notify(
     _class: JClass,
     title: JString,
     body: JString,
-    icon_path: JString,
 ) {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let title: String = env.get_string(&title).unwrap().into();
-        let body: String = env.get_string(&body).unwrap().into();
-        let icon_path: String = env.get_string(&icon_path).unwrap().into();
+    let title: String = env.get_string(&title).unwrap().into();
+    let body: String = env.get_string(&body).unwrap().into();
 
-        notifications::notify(&title, &body, &icon_path);
-    }
+    let event = IncomingEvent::Notification(title, body);
+    send_incoming_event(event);
 }
 
 #[unsafe(no_mangle)]
@@ -415,11 +413,11 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getSystemLocal
 //     rx.recv().unwrap();
 // }
 
-pub fn send_incoming_player_event(incoming_event: IncomingPlayerEvent) {
+pub fn send_incoming_event(incoming_event: IncomingEvent) {
     let tx = INCOMING_PLAYER_EVENT_TX.lock().unwrap();
 
     if let Some(ref sender) = *tx {
-        match sender.blocking_send(incoming_event) {
+        match sender.try_send(incoming_event) {
             Ok(_) => {}
             Err(e) => eprintln!("Error sending message to channel: {e}"),
         }
@@ -545,6 +543,19 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
                 &[(&item_id).into()],
             )
         }
+
+        #[cfg(target_os = "linux")]
+        JniCallback::FilePicked(req_id, uri) => {
+            let uri = env.new_string(uri).unwrap();
+            let req_id = *req_id as jint;
+
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onFilePicked",
+                "(ILjava/lang/String;)V",
+                &[req_id.into(), (&uri).into()],
+            )
+        }
     };
 
     if let Err(e) = result {
@@ -563,5 +574,117 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
         call_java_fn(&mut env, &event);
     }) {
         eprintln!("Error listening for media: {e}");
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordActivity(
+    mut env: JNIEnv,
+    _class: JClass,
+    client_id: JString,
+    state: JString,
+    details: JString,
+    large_text: JString,
+    start_time: jlong,
+    end_time: jlong,
+    art_url: JString,
+    is_playing: jboolean,
+    status_is_state: jboolean,
+) -> jboolean {
+    let client_id: String = env
+        .get_string(&client_id)
+        .expect("Couldn't get java string!")
+        .into();
+    let state: String = env
+        .get_string(&state)
+        .expect("Couldn't get java string!")
+        .into();
+    let details: String = env
+        .get_string(&details)
+        .expect("Couldn't get java string!")
+        .into();
+    let large_text: String = env
+        .get_string(&large_text)
+        .expect("Couldn't get java string!")
+        .into();
+    let art_url: String = env
+        .get_string(&art_url)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let art_url = if art_url.is_empty() {
+        None
+    } else {
+        Some(art_url)
+    };
+
+    let end_time = if end_time > 0 { Some(end_time) } else { None };
+    let is_playing = is_playing != 0;
+    let status_is_state = status_is_state != 0;
+
+    let activity = DiscordActivity::Playing {
+        client_id,
+        state,
+        details,
+        large_text,
+        start_time,
+        end_time,
+        art_url,
+        status_is_state,
+        is_playing,
+    };
+
+    discord::discord_rpc(activity).is_ok() as jboolean
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_clearDiscordActivity(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    discord::discord_rpc(DiscordActivity::Clear).is_ok() as jboolean
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopDiscordActivity(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    discord::discord_rpc(DiscordActivity::Stop).is_ok() as jboolean
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_xdgFileChooser(
+    mut env: JNIEnv,
+    _class: JClass,
+    request_id: jint,
+    save: jboolean,
+    title: JString,
+    file_name: JString,
+    filters: JObjectArray,
+) {
+    #[cfg(target_os = "linux")]
+    {
+        let save = save != 0;
+        let title: String = env
+            .get_string(&title)
+            .expect("Couldn't get java string!")
+            .into();
+        let file_name: String = env
+            .get_string(&file_name)
+            .expect("Couldn't get java string!")
+            .into();
+        let mut filters_vec = Vec::new();
+
+        for i in 0..env.get_array_length(&filters).unwrap() {
+            let value = env.get_object_array_element(&filters, i);
+            let filter = value.unwrap();
+            let filter: String = env.get_string(&JString::from(filter)).unwrap().into();
+            filters_vec.push(filter);
+        }
+
+        let event =
+            IncomingEvent::LaunchFilePicker(request_id, save, title, file_name, filters_vec);
+        send_incoming_event(event);
     }
 }

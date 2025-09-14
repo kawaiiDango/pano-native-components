@@ -37,17 +37,15 @@ pub enum PlaybackState {
     Other,
 }
 
-#[cfg(target_os = "macos")]
-use crate::media_listener::MediaRemoteEvent;
-
 #[derive(Debug, Clone)]
-pub enum IncomingPlayerEvent {
+pub enum IncomingEvent {
     Skip(String),
     Mute(String),
     Unmute(String),
     AlbumArtToggled(bool),
     RefreshSessions,
     Shutdown,
-    #[cfg(target_os = "macos")]
-    MediaRemote(MediaRemoteEvent),
+    #[cfg(target_os = "linux")]
+    LaunchFilePicker(i32, bool, String, String, Vec<String>),
+    Notification(String, String),
 }
