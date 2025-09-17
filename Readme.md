@@ -42,3 +42,8 @@ I used code from these projects as a reference:
 https://github.com/Mange/mpris-rs
 
 https://github.com/KDE/kdeconnect-kde
+
+
+### License
+
+SPDX-License-Identifier: GPL-3.0-or-later
