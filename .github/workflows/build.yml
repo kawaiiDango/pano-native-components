@@ -25,7 +25,9 @@ jobs:
     - name: Upload binary
       uses: actions/upload-artifact@v4
       with:
-        name: |
-          *.dll
-          *.so
-        path: target/release/
+        name: libs
+        path: |
+          target/release/libpano_native_components.so
+          target/release/libnative_webview.so
+          target/release/pano_native_components.dll
+          target/release/native_webview.dll
