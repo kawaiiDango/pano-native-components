@@ -10,6 +10,7 @@ mod tray;
 mod discord;
 mod ipc;
 mod jni_callback;
+mod theme_observer;
 mod windows_utils;
 
 use jni::sys::{jboolean, jint, jlong};
@@ -554,6 +555,16 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
                 "onFilePicked",
                 "(ILjava/lang/String;)V",
                 &[req_id.into(), (&uri).into()],
+            )
+        }
+
+        JniCallback::DarkModeChanged(is_dark_mode) => {
+            let is_dark_mode = *is_dark_mode as jboolean;
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "onDarkModeChange",
+                "(Z)V",
+                &[is_dark_mode.into()],
             )
         }
     };

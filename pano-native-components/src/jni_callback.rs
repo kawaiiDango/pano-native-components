@@ -9,4 +9,5 @@ pub enum JniCallback {
     MetadataChanged(String, MetadataInfo),
     PlaybackStateChanged(String, PlaybackInfo),
     IpcCallback(String, String),
+    DarkModeChanged(bool),
 }

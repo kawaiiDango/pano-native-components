@@ -27,6 +27,7 @@ use crate::{
     jni_callback::JniCallback,
     media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
+    theme_observer,
 };
 use crate::{media_listener::linux_mpris::metadata::Metadata, tray};
 
@@ -280,7 +281,7 @@ pub async fn listener(
         let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(event);
     });
 
-    let tray = tray::tray_listener(outgoing_tx);
+    let tray = tray::tray_listener(outgoing_tx.clone());
 
     let outgoing_events = async {
         while let Some(event) = outgoing_rx.recv().await {
@@ -290,12 +291,15 @@ pub async fn listener(
         Ok(())
     };
 
+    let theme_observer = theme_observer::observe(outgoing_tx);
+
     tokio::try_join!(
         incoming_events.map_err(Into::into),
         mpris_events.map_err(Into::into),
         ipc_commands,
         tray,
-        outgoing_events
+        outgoing_events,
+        theme_observer,
     )?;
 
     Ok(())

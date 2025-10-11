@@ -1,7 +1,7 @@
-use crate::ipc;
 use crate::jni_callback::JniCallback;
 use crate::media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState};
 use crate::{INCOMING_PLAYER_EVENT_TX, is_app_allowed};
+use crate::{ipc, theme_observer};
 use notify_rust::Notification;
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -54,6 +54,7 @@ pub async fn listener(
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(incoming_tx);
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
+    let outgoing_tx_clone = outgoing_tx.clone();
     OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx).unwrap();
 
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.join()?;
@@ -174,7 +175,14 @@ pub async fn listener(
         let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(event);
     });
 
-    tokio::try_join!(session_events, ipc_commands, outgoing_events)?;
+    let theme_observer_future = theme_observer::observe(outgoing_tx_clone);
+
+    tokio::try_join!(
+        session_events,
+        ipc_commands,
+        outgoing_events,
+        theme_observer_future
+    )?;
 
     Ok(())
 }

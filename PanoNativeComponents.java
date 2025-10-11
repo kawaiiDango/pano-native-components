@@ -152,4 +152,8 @@ public class PanoNativeComponents {
         System.out.println("onReceiveIpcCommand: " + command + " " + arg);
     }
 
+    public static void onDarkModeChange(boolean isDarkMode) {
+        System.out.println("onDarkModeChange: " + isDarkMode);
+    }
+
 }
