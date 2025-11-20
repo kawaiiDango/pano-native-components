@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    env,
-    str::FromStr,
-    sync::{LazyLock, Mutex, OnceLock},
-    time::Duration,
-};
+use std::{collections::HashMap, env, str::FromStr, sync::OnceLock, time::Duration};
 
 use futures_util::{TryFutureExt, stream::StreamExt};
 use notify_rust::{Hint, Notification, Urgency};
@@ -53,8 +47,6 @@ async fn get_identity(connection: &Connection, dbus_name: &str) -> String {
 }
 
 static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::new();
-
-static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
@@ -162,11 +154,6 @@ pub async fn listener(
                             stop_tracking_player(names_to_handles.write().await.remove(app_id));
                         }
                     }
-                }
-
-                IncomingEvent::AlbumArtToggled(enabled) => {
-                    let mut album_art_enabled = ALBUM_ART_ENABLED.lock().unwrap();
-                    *album_art_enabled = *enabled;
                 }
 
                 IncomingEvent::Shutdown => {
@@ -418,29 +405,51 @@ async fn player_listeners(
         }
         zbus::Result::Ok(())
     };
-
     let seek_listener = async {
         if let Ok(mut seek_changed) = seek_changed {
-            while let Some(seek_changed) = seek_changed.next().await {
-                if let Ok(seek_args) = seek_changed.args() {
-                    let position = *seek_args.Position() / 1000;
-                    let playback_event = parse_playback_state(
-                        player_proxy
-                            .cached_playback_status()
-                            .unwrap_or_default()
-                            .unwrap_or_default(),
-                        player_proxy
-                            .cached_can_go_next()
-                            .unwrap_or_default()
-                            .unwrap_or_default(),
-                        position,
-                    );
-                    let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
-                        JniCallback::PlaybackStateChanged(
-                            app_id_normalized.clone(),
-                            playback_event,
-                        ),
-                    );
+            let debounce_duration = Duration::from_secs(1);
+
+            let emit_position = |position: i64| {
+                let playback_event = parse_playback_state(
+                    player_proxy
+                        .cached_playback_status()
+                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                    player_proxy
+                        .cached_can_go_next()
+                        .unwrap_or_default()
+                        .unwrap_or_default(),
+                    position,
+                );
+                let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
+                    JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+                );
+            };
+
+            while let Some(seek_signal) = seek_changed.next().await {
+                let Ok(seek_args) = seek_signal.args() else {
+                    continue;
+                };
+
+                let mut latest_position = *seek_args.Position() / 1000;
+
+                loop {
+                    match timeout(debounce_duration, seek_changed.next()).await {
+                        Ok(Some(next_signal)) => {
+                            if let Ok(next_args) = next_signal.args() {
+                                latest_position = *next_args.Position() / 1000;
+                            }
+                            continue;
+                        }
+                        Ok(None) => {
+                            emit_position(latest_position);
+                            return zbus::Result::Ok(());
+                        }
+                        Err(_) => {
+                            emit_position(latest_position);
+                            break;
+                        }
+                    }
                 }
             }
         }

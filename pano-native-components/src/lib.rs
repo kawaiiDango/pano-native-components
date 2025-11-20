@@ -97,15 +97,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
     send_incoming_event(IncomingEvent::RefreshSessions);
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_albumArtEnabled(
-    _env: JNIEnv,
-    _class: JClass,
-    enabled: jboolean,
-) {
-    send_incoming_event(IncomingEvent::AlbumArtToggled(enabled != 0));
-}
-
 pub fn is_app_allowed(app_id: &str) -> bool {
     APP_IDS_ALLOW_LIST.lock().unwrap().contains(app_id)
 }
@@ -600,7 +591,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordA
     end_time: jlong,
     art_url: JString,
     is_playing: jboolean,
-    status_is_state: jboolean,
+    status_line: jint,
+    button_texts: JObjectArray,
+    button_urls: JObjectArray,
 ) -> jboolean {
     let client_id: String = env
         .get_string(&client_id)
@@ -631,7 +624,30 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordA
 
     let end_time = if end_time > 0 { Some(end_time) } else { None };
     let is_playing = is_playing != 0;
-    let status_is_state = status_is_state != 0;
+
+    let buttons_texts_and_urls = if button_texts.is_null() || button_urls.is_null() {
+        Vec::new()
+    } else {
+        let len_texts = env.get_array_length(&button_texts).unwrap();
+        let len_urls = env.get_array_length(&button_urls).unwrap();
+        let len = len_texts.min(len_urls);
+
+        let mut buttons = Vec::with_capacity(len.try_into().unwrap());
+
+        for i in 0..len {
+            let text_obj = env.get_object_array_element(&button_texts, i).unwrap();
+            let url_obj = env.get_object_array_element(&button_urls, i).unwrap();
+
+            let text: String = env.get_string(&JString::from(text_obj)).unwrap().into();
+            let url: String = env.get_string(&JString::from(url_obj)).unwrap().into();
+
+            if !text.is_empty() && !url.is_empty() {
+                buttons.push((text, url));
+            }
+        }
+
+        buttons
+    };
 
     let activity = DiscordActivity::Playing {
         client_id,
@@ -641,8 +657,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordA
         start_time,
         end_time,
         art_url,
-        status_is_state,
+        status_line,
         is_playing,
+        buttons_texts_and_urls,
     };
 
     discord::discord_rpc(activity).is_ok() as jboolean

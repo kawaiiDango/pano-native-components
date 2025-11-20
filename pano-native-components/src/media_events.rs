@@ -42,7 +42,6 @@ pub enum IncomingEvent {
     Skip(String),
     Mute(String),
     Unmute(String),
-    AlbumArtToggled(bool),
     RefreshSessions,
     Shutdown,
     #[cfg(target_os = "linux")]

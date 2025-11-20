@@ -12,8 +12,6 @@ public class PanoNativeComponents {
 
     static native void setAllowedAppIds(String[] appIds);
 
-    static native void albumArtEnabled(boolean enabled);
-
     static native void stopListeningMedia();
 
     static native void skip(String appId);
@@ -40,7 +38,7 @@ public class PanoNativeComponents {
 
     static native void onFilePicked(int requestId, String uri);
 
-    static native boolean updateDiscordActivity(String clientId, String state, String details, String largeText, long startTime, long endTime, String artUrl, boolean isPlaying, boolean statusIsState);
+    static native boolean updateDiscordActivity(String clientId, String state, String details, String largeText, long startTime, long endTime, String artUrl, boolean isPlaying, int statusLine, String[] buttonTexts, String[] buttonUrls);
 
     static native boolean clearDiscordActivity();
 
@@ -85,8 +83,6 @@ public class PanoNativeComponents {
                 }
 
                 PanoNativeComponents.notify("Test Notification", "This is a test notification");
-
-                albumArtEnabled(true);
 
                 // test tray icon
                 String menuItemIds[] = new String[] { "1", "2", "3", "Separator", "4" };

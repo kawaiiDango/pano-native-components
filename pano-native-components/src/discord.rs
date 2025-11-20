@@ -1,6 +1,10 @@
 use std::sync::{Mutex, OnceLock};
 
-use discord_rich_presence::{DiscordIpc, DiscordIpcClient, activity, error};
+use discord_rich_presence::{
+    DiscordIpc, DiscordIpcClient,
+    activity::{self},
+    error,
+};
 
 #[derive(Debug)]
 pub enum DiscordActivity {
@@ -12,8 +16,9 @@ pub enum DiscordActivity {
         start_time: i64,
         end_time: Option<i64>,
         art_url: Option<String>,
-        status_is_state: bool,
+        status_line: i32,
         is_playing: bool,
+        buttons_texts_and_urls: Vec<(String, String)>,
     },
     Clear,
     Stop,
@@ -22,8 +27,6 @@ pub enum DiscordActivity {
 static CLIENT: OnceLock<Mutex<DiscordIpcClient>> = OnceLock::new();
 
 pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
-    println!("Sending Discord RPC: {:?}", activity);
-
     match activity {
         DiscordActivity::Playing {
             client_id,
@@ -33,8 +36,9 @@ pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
             start_time,
             end_time,
             art_url,
-            status_is_state,
+            status_line,
             is_playing,
+            buttons_texts_and_urls,
         } => {
             let mut client = CLIENT
                 .get_or_init(|| Mutex::new(DiscordIpcClient::new(&client_id)))
@@ -43,20 +47,20 @@ pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
 
             let mut assets = activity::Assets::new();
 
-            assets = assets
-                .large_image(art_url.as_deref().unwrap_or("cover-placeholder"))
-                .large_text(large_text.as_str());
+            assets = assets.large_image(art_url.as_deref().unwrap_or("graphic_eq"));
 
-            assets = if is_playing {
-                assets.small_image("playing").small_text("Playing")
-            } else {
-                assets.small_image("paused").small_text("Paused")
+            if !large_text.is_empty() {
+                assets = assets.large_text(large_text.as_str());
+            }
+
+            if !is_playing {
+                assets = assets.small_image("pause_circle").small_text("Paused")
             };
 
-            let status_display_type = if status_is_state {
-                activity::StatusDisplayType::State
-            } else {
-                activity::StatusDisplayType::Details
+            let status_display_type = match status_line {
+                2 => activity::StatusDisplayType::State,
+                1 => activity::StatusDisplayType::Details,
+                _ => activity::StatusDisplayType::Name,
             };
 
             let mut activity = activity::Activity::new()
@@ -66,16 +70,21 @@ pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
                 .status_display_type(status_display_type)
                 .assets(assets);
 
-            // Don't show timestamp if the song is paused, since Discord will continue counting up otherwise
-            activity = if is_playing {
-                let mut ts = activity::Timestamps::new().start(start_time);
-                if let Some(end_time) = end_time {
-                    ts = ts.end(end_time);
-                }
-                activity.timestamps(ts)
-            } else {
-                activity
-            };
+            if !buttons_texts_and_urls.is_empty() {
+                let buttons = buttons_texts_and_urls
+                    .iter()
+                    .take(2)
+                    .map(|(text, url)| activity::Button::new(text, url))
+                    .collect();
+                activity = activity.buttons(buttons);
+                activity = activity.details_url(buttons_texts_and_urls[0].1.as_str());
+            }
+
+            let mut ts = activity::Timestamps::new().start(start_time);
+            if let Some(end_time) = end_time {
+                ts = ts.end(end_time);
+            }
+            activity = activity.timestamps(ts);
 
             let send_result = client.set_activity(activity.clone());
 
@@ -89,6 +98,11 @@ pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
                     client.reconnect()?;
                     client.set_activity(activity)?;
                 }
+                Err(error::Error::WriteError(_)) => {
+                    client.reconnect()?;
+                    client.set_activity(activity)?;
+                }
+
                 Err(e) => {
                     eprintln!("Failed to set Discord activity: {e}");
                 }

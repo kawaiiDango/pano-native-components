@@ -100,10 +100,6 @@ pub async fn listener(
                     update_sessions(&manager);
                 }
 
-                IncomingEvent::AlbumArtToggled(enabled) => {
-                    *ALBUM_ART_ENABLED.lock().unwrap() = enabled;
-                }
-
                 IncomingEvent::Shutdown => {
                     INCOMING_PLAYER_EVENT_TX.lock().unwrap().take();
 
@@ -576,20 +572,17 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
             let existing_playback_info = cache.get(&app_id);
 
             if let Some(existing_playback_info) = existing_playback_info {
-                if existing_playback_info.position == -1 || position < 1500 {
-                    // todo figure something out to prevent the spam
-                    let mut playback_info = existing_playback_info.clone();
-                    playback_info.position = position;
+                let mut playback_info = existing_playback_info.clone();
+                playback_info.position = position;
 
-                    // update the cache
-                    cache.insert(app_id.clone(), playback_info.clone());
+                // update the cache
+                cache.insert(app_id.clone(), playback_info.clone());
 
-                    // report the updated playback info
-                    let _ = OUTGOING_PLAYER_EVENT_TX
-                        .get()
-                        .unwrap()
-                        .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
-                }
+                // report the updated playback info
+                let _ = OUTGOING_PLAYER_EVENT_TX
+                    .get()
+                    .unwrap()
+                    .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
             } else {
                 let playback_info = PlaybackInfo {
                     state: PlaybackState::None,
