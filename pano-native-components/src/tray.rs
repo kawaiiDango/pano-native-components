@@ -74,7 +74,7 @@ impl ksni::Tray for PanoTray {
                                 .try_send(JniCallback::TrayItemClicked(id_owned.clone()))
                                 .unwrap();
                         }),
-                        enabled: id != "Dummy",
+                        enabled: !id.ends_with("Disabled"),
                         ..Default::default()
                     }),
                 }

@@ -355,6 +355,27 @@ async fn player_listeners(
                     app_id_normalized.clone(),
                     metadata_event,
                 ));
+
+            // re-fetch position for players with gapless playback
+            let position = player_proxy
+                .position()
+                .await
+                .map(|x| x / 1000)
+                .unwrap_or(-1);
+            let can_go_next = player_proxy.cached_can_go_next().unwrap_or_default();
+            let playback_status = player_proxy.cached_playback_status().unwrap_or_default();
+
+            // skip if not cached
+            if playback_status.is_none() || can_go_next.is_none() {
+                continue;
+            }
+
+            let playback_event =
+                parse_playback_state(playback_status.unwrap(), can_go_next.unwrap(), position);
+
+            let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
+                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+            );
         }
 
         zbus::Result::Ok(())
