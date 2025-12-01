@@ -32,8 +32,6 @@ public class PanoNativeComponents {
 
     static native boolean isFileLocked(String path);
 
-    static native String getSystemLocale();
-
     static native void xdgFileChooser(int requestId, boolean save, String title, String fileName, String[] filters);
 
     static native void onFilePicked(int requestId, String uri);
@@ -50,7 +48,6 @@ public class PanoNativeComponents {
 
     public static void main(String[] args) {
         System.out.println(ping("🪼hello " + getMachineId()));
-        System.out.println("locale: " + getSystemLocale());
         applyDarkModeToWindow(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
 

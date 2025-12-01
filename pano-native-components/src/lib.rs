@@ -319,51 +319,6 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isFileLocked(
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getSystemLocale<'a>(
-    env: JNIEnv<'a>,
-    _class: JClass<'a>,
-) -> JString<'a> {
-    #[cfg(target_os = "windows")]
-    {
-        let (language, country) = windows_utils::get_language_country_codes()
-            .unwrap_or(("en".to_string(), "US".to_string()));
-        let locale = format!("{language}-{country}");
-        env.new_string(locale)
-            .expect("Couldn't create java string!")
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // from https://github.com/i509VCB/current_locale/blob/master/src/unix.rs
-
-        // Unix uses the LANG environment variable to store the locale
-        let locale = match env::var("LANG") {
-            Ok(raw_lang) => {
-                // Unset locale - C ANSI standards say default to en-US
-                if raw_lang == "C" {
-                    "en-US".to_owned()
-                } else if let Some(pos) = raw_lang.find([' ', '.']) {
-                    let (raw_lang_code, _) = raw_lang.split_at(pos);
-                    let result = raw_lang_code.replace("_", "-");
-
-                    // Finally replace underscores with `-` and drop everything after an `@`
-                    result.split('@').next().unwrap().to_string()
-                } else {
-                    "en-US".to_string() // Default to en-US if LANG is not set or malformed
-                }
-            }
-
-            Err(_) => {
-                "en-US".to_string() // Default to en-US if LANG is not set
-            }
-        };
-
-        env.new_string(locale)
-            .expect("Couldn't create java string!")
-    }
-}
-
 // #[unsafe(no_mangle)]
 // pub extern "system" fn  Java_com_arn_scrobble_media_DesktopMediaListenerWrapper_asyncComputation(
 //     env: JNIEnv,

@@ -29,7 +29,6 @@ windows = { version = "0.62", features = [
     "ApplicationModel",
     "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
-    "Win32_Globalization",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_Security",
