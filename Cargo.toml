@@ -1,3 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["pano-native-components", "native-webview"]
+
+[profile.release]
+strip = true
