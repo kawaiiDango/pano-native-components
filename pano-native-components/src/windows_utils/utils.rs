@@ -1,10 +1,8 @@
 use std::fs::OpenOptions;
 use std::os::windows::fs::OpenOptionsExt;
 
-use windows::Win32::Foundation::{HMODULE, HWND};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-use windows::core::{PCSTR, PCWSTR, s};
 // use windows_registry::CURRENT_USER;
 
 // const REG_NAME: &str = "Pano Scrobbler";
@@ -24,6 +22,8 @@ use windows::core::{PCSTR, PCWSTR, s};
 // }
 
 // taken from tao
+
+/*
 pub fn allow_dark_mode_for_app(is_dark_mode: bool) {
     let huxtheme: isize = unsafe { LoadLibraryA(s!("uxtheme.dll")).unwrap_or_default().0 as _ };
 
@@ -58,6 +58,7 @@ pub fn allow_dark_mode_for_app(is_dark_mode: bool) {
         unsafe { _set_preferred_app_mode(mode) };
     }
 }
+*/
 
 pub fn apply_dark_mode_to_window(handle: i64) {
     let use_dark: i32 = 1;
