@@ -30,6 +30,9 @@ use std::sync::{LazyLock, Mutex};
 use crate::discord::DiscordActivity;
 use crate::media_events::{MetadataInfo, PlaybackInfo};
 
+// Media player prefixes to ignore by default (e.g. spammy apps)
+const IGNORED_PLAYER_PREFIXES: &[&str] = &["org.mpris.MediaPlayer2.kdeconnect"];
+
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
@@ -98,6 +101,10 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
 }
 
 pub fn is_app_allowed(app_id: &str) -> bool {
+    if IGNORED_PLAYER_PREFIXES.iter().any(|prefix| app_id.starts_with(prefix)) {
+        return false;
+    }
+
     APP_IDS_ALLOW_LIST.lock().unwrap().contains(app_id)
 }
 
