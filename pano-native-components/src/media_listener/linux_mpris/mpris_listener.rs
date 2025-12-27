@@ -17,7 +17,7 @@ use zbus::{
 };
 
 use crate::{
-    INCOMING_PLAYER_EVENT_TX, file_picker, ipc, is_app_allowed,
+    INCOMING_PLAYER_EVENT_TX, file_picker, ipc, is_app_allowed, is_app_ignored,
     jni_callback::JniCallback,
     media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
@@ -587,14 +587,14 @@ fn normalize_active_players(
     dbus_names_to_identities: &HashMap<String, String>,
 ) -> Vec<(String, String)> {
     // replace .instance1234 at the end with .instancen
+    // and filter out ignored players
 
     dbus_names_to_identities
         .iter()
         .map(|(app_id, app_name)| {
-            let app_id = normalize_dbus_name(app_id);
-            let app_name = app_name.clone();
-
-            (app_id, app_name)
+            let app_id_normalized = normalize_dbus_name(app_id);
+            (app_id_normalized, app_name.clone())
         })
+        .filter(|(app_id, _)| !is_app_ignored(app_id))
         .collect::<Vec<_>>()
 }

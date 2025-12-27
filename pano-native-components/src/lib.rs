@@ -100,8 +100,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppI
     send_incoming_event(IncomingEvent::RefreshSessions);
 }
 
+pub fn is_app_ignored(app_id: &str) -> bool {
+    IGNORED_PLAYER_PREFIXES.iter().any(|prefix| app_id.starts_with(prefix))
+}
+
 pub fn is_app_allowed(app_id: &str) -> bool {
-    if IGNORED_PLAYER_PREFIXES.iter().any(|prefix| app_id.starts_with(prefix)) {
+    if is_app_ignored(app_id) {
         return false;
     }
 
