@@ -62,7 +62,7 @@ impl ksni::Tray for PanoTray {
             .iter()
             .map(|(id, text)| {
                 let id_owned = id.clone();
-                let text_owned = text.clone();
+                let text_owned = text.replace("_", "__"); // see ksni docs for why
                 match id.as_str() {
                     "Separator" => MenuItem::Separator,
                     _ => MenuItem::Standard(StandardItem {

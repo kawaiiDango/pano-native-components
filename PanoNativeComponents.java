@@ -83,7 +83,7 @@ public class PanoNativeComponents {
 
                 // test tray icon
                 String menuItemIds[] = new String[] { "1", "2", "3", "Separator", "4" };
-                String menuItemTexts[] = new String[] { "📝 item1", "item2", "item3", "", "item4" };
+                String menuItemTexts[] = new String[] { "📝 item_1", "item_2", "item_3", "", "item_4" };
 
                 int size = 8;
                 int[] argb = new int[size * size];
