@@ -17,7 +17,7 @@ use zbus::{
 };
 
 use crate::{
-    INCOMING_PLAYER_EVENT_TX, file_picker, ipc, is_app_allowed,
+    INCOMING_PLAYER_EVENT_TX, file_picker, ipc,
     jni_callback::JniCallback,
     media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
@@ -50,9 +50,12 @@ static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock:
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
-    jni_callback: impl Fn(JniCallback) + 'static,
+    jni_callback: impl Fn(JniCallback) -> Option<bool> + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (all_players_tx, mut all_players_rx) = mpsc::channel(100);
+
+    let _ = all_players_tx.try_send(IncomingEvent::RefreshSessions);
+
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(all_players_tx);
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
@@ -65,6 +68,10 @@ pub async fn listener(
     let connection = Connection::session().await?;
 
     let dbus_proxy = DBusProxy::new(&connection).await?;
+
+    let is_app_allowed = |app_id: &str| -> bool {
+        jni_callback(JniCallback::IsAppIdAllowed(app_id.to_string())).unwrap_or(false)
+    };
 
     // listener just started, poll existing values
 
@@ -85,7 +92,7 @@ pub async fn listener(
                 get_identity(&connection, &dbus_name).await,
             );
 
-            if is_app_allowed(&normalize_dbus_name(&dbus_name)) {
+            if is_app_allowed(&dbus_name) {
                 start_tracking_player(
                     &connection,
                     dbus_name.to_string(),
@@ -94,11 +101,6 @@ pub async fn listener(
             }
         }
     }
-
-    let active_players = dbus_names_to_identities.read().await.clone();
-    let normalized_active_players = normalize_active_players(&active_players);
-
-    jni_callback(JniCallback::SessionsChanged(normalized_active_players));
 
     // listen for new players
     let mut name_owner_changed = dbus_proxy.receive_name_owner_changed().await?;
@@ -135,13 +137,8 @@ pub async fn listener(
 
                 IncomingEvent::RefreshSessions => {
                     for (app_id, _app_name) in dbus_names_to_identities.read().await.iter() {
-                        let app_id_normalized = normalize_dbus_name(app_id);
-                        let is_allowed = is_app_allowed(&app_id_normalized);
-                        let is_tracking = names_to_handles
-                            .read()
-                            .await
-                            .contains_key(&app_id_normalized);
-
+                        let is_allowed = is_app_allowed(app_id);
+                        let is_tracking = names_to_handles.read().await.contains_key(app_id);
                         if is_allowed && !is_tracking {
                             start_tracking_player(
                                 &connection,
@@ -154,6 +151,12 @@ pub async fn listener(
                             stop_tracking_player(names_to_handles.write().await.remove(app_id));
                         }
                     }
+
+                    let active_players = dbus_names_to_identities.read().await.clone();
+
+                    jni_callback(JniCallback::SessionsChanged(
+                        active_players.into_iter().collect(),
+                    ));
                 }
 
                 IncomingEvent::Shutdown => {
@@ -232,7 +235,7 @@ pub async fn listener(
                     get_identity(&connection, dbus_name).await,
                 );
 
-                if is_app_allowed(&normalize_dbus_name(dbus_name)) {
+                if is_app_allowed(dbus_name) {
                     start_tracking_player(
                         &connection,
                         dbus_name.to_string(),
@@ -253,11 +256,12 @@ pub async fn listener(
             }
 
             let active_players = dbus_names_to_identities.read().await.clone();
-            let normalized_active_players = normalize_active_players(&active_players);
             let _ = OUTGOING_PLAYER_EVENT_TX
                 .get()
                 .unwrap()
-                .try_send(JniCallback::SessionsChanged(normalized_active_players));
+                .try_send(JniCallback::SessionsChanged(
+                    active_players.into_iter().collect(),
+                ));
         }
         Ok::<(), zbus::Error>(())
     };
@@ -303,8 +307,6 @@ async fn player_listeners(
         .build()
         .await?;
 
-    let app_id_normalized = normalize_dbus_name(&app_id);
-
     // todo: handle errors
 
     let mut prev_volume = player_proxy.volume().await.unwrap_or_default();
@@ -315,10 +317,7 @@ async fn player_listeners(
     let _ = OUTGOING_PLAYER_EVENT_TX
         .get()
         .unwrap()
-        .try_send(JniCallback::MetadataChanged(
-            app_id_normalized.clone(),
-            metadata_event,
-        ));
+        .try_send(JniCallback::MetadataChanged(app_id.clone(), metadata_event));
 
     let playback_status = player_proxy.playback_status().await.unwrap_or_default();
     let can_go_next = player_proxy.can_go_next().await.unwrap_or_default();
@@ -333,7 +332,7 @@ async fn player_listeners(
         .get()
         .unwrap()
         .try_send(JniCallback::PlaybackStateChanged(
-            app_id_normalized.clone(),
+            app_id.clone(),
             playback_event,
         ));
 
@@ -351,10 +350,7 @@ async fn player_listeners(
             let _ = OUTGOING_PLAYER_EVENT_TX
                 .get()
                 .unwrap()
-                .try_send(JniCallback::MetadataChanged(
-                    app_id_normalized.clone(),
-                    metadata_event,
-                ));
+                .try_send(JniCallback::MetadataChanged(app_id.clone(), metadata_event));
 
             // re-fetch position for players with gapless playback
             let position = player_proxy
@@ -374,7 +370,7 @@ async fn player_listeners(
                 parse_playback_state(playback_status.unwrap(), can_go_next.unwrap(), position);
 
             let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
-                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+                JniCallback::PlaybackStateChanged(app_id.clone(), playback_event),
             );
         }
 
@@ -398,7 +394,7 @@ async fn player_listeners(
                 position,
             );
             let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
-                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+                JniCallback::PlaybackStateChanged(app_id.clone(), playback_event),
             );
         }
         zbus::Result::Ok(())
@@ -421,7 +417,7 @@ async fn player_listeners(
                 position,
             );
             let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
-                JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+                JniCallback::PlaybackStateChanged(app_id.clone(), playback_event),
             );
         }
         zbus::Result::Ok(())
@@ -443,7 +439,7 @@ async fn player_listeners(
                     position,
                 );
                 let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(
-                    JniCallback::PlaybackStateChanged(app_id_normalized.clone(), playback_event),
+                    JniCallback::PlaybackStateChanged(app_id.clone(), playback_event),
                 );
             };
 
@@ -535,16 +531,6 @@ fn stop_tracking_player(handle: Option<PlayerListenerHandle>) {
     }
 }
 
-fn normalize_dbus_name(app_id: &str) -> String {
-    let app_id = app_id.to_string();
-    let app_id_splits = app_id.rsplit_once(".instance");
-
-    match app_id_splits {
-        Some((app_id, _)) => format!("{app_id}.instancen"),
-        None => app_id,
-    }
-}
-
 fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataInfo {
     let metadata = Metadata::from(metadata);
 
@@ -569,7 +555,6 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
             .map(|x| x.as_millis().try_into().unwrap_or(-1))
             .unwrap_or(-1),
         art_url: art_url.unwrap_or_default().to_string(),
-        art_bytes: Vec::new(), // not used on linux
     }
 }
 
@@ -581,20 +566,4 @@ fn parse_playback_state(playback_status: String, can_go_next: bool, position: i6
         position,
         can_skip: can_go_next,
     }
-}
-
-fn normalize_active_players(
-    dbus_names_to_identities: &HashMap<String, String>,
-) -> Vec<(String, String)> {
-    // replace .instance1234 at the end with .instancen
-
-    dbus_names_to_identities
-        .iter()
-        .map(|(app_id, app_name)| {
-            let app_id = normalize_dbus_name(app_id);
-            let app_name = app_name.clone();
-
-            (app_id, app_name)
-        })
-        .collect::<Vec<_>>()
 }

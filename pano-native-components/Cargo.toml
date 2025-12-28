@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 jni = "0.21"
 strum = { version = "0.27", features = ["derive"] }
-tokio = { version = "1.48", features = ["rt", "sync", "macros", "time"] }
+tokio = { version = "1.49", features = ["rt", "sync", "macros", "time"] }
 interprocess = { version = "2.2", features = ["tokio"] }
 discord-rich-presence = "1.0"
 notify-rust = "4"
@@ -24,7 +24,6 @@ ashpd = "0.12"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
     "Media_Control",
-    "Storage_Streams",
     "ApplicationModel",
     "Win32_Graphics_Dwm",
     "Win32_System_Registry",

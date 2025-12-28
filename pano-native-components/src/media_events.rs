@@ -10,7 +10,6 @@ pub struct MetadataInfo {
     pub track_number: i32,
     pub duration: i64,
     pub art_url: String,
-    pub art_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]

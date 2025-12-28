@@ -1,6 +1,6 @@
+use crate::INCOMING_PLAYER_EVENT_TX;
 use crate::jni_callback::JniCallback;
 use crate::media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState};
-use crate::{INCOMING_PLAYER_EVENT_TX, is_app_allowed};
 use crate::{ipc, theme_observer};
 use notify_rust::Notification;
 use std::collections::{HashMap, HashSet};
@@ -13,9 +13,9 @@ use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSessionPlaybackStatus, MediaPropertiesChangedEventArgs,
     PlaybackInfoChangedEventArgs, SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
 };
-use windows::Storage::Streams::{
-    Buffer, DataReader, IRandomAccessStreamWithContentType, InputStreamOptions,
-};
+// use windows::Storage::Streams::{
+//     Buffer, DataReader, IRandomAccessStreamWithContentType, InputStreamOptions,
+// };
 
 static PLAYBACK_INFO_CACHE: LazyLock<Mutex<HashMap<String, PlaybackInfo>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -29,9 +29,9 @@ static APP_NAMES_CACHE: LazyLock<Mutex<HashMap<String, String>>> =
 static PREV_APP_IDS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+// static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
-const MAX_ART_BYTES: usize = 1024 * 1024; // 1 MB
+// const MAX_ART_BYTES: usize = 1024 * 1024; // 1 MB
 
 struct CallbackTokens {
     playback_info_changed: i64,
@@ -48,14 +48,20 @@ static OUTGOING_PLAYER_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock:
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn listener(
-    jni_callback: impl Fn(JniCallback) + 'static,
+    jni_callback: impl Fn(JniCallback) -> Option<bool> + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (incoming_tx, mut incoming_rx) = mpsc::channel(10);
+    let incoming_tx_clone = incoming_tx.clone();
+    let _ = incoming_tx.try_send(IncomingEvent::RefreshSessions);
     *INCOMING_PLAYER_EVENT_TX.lock().unwrap() = Some(incoming_tx);
 
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel(10);
     let outgoing_tx_clone = outgoing_tx.clone();
     OUTGOING_PLAYER_EVENT_TX.set(outgoing_tx).unwrap();
+
+    let is_app_allowed = |app_id: &str| -> bool {
+        jni_callback(JniCallback::IsAppIdAllowed(app_id.to_string())).unwrap_or(false)
+    };
 
     let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.join()?;
 
@@ -65,8 +71,8 @@ pub async fn listener(
             SessionsChangedEventArgs,
         >::new(move |m, _| {
             match m.as_ref() {
-                Some(m) => {
-                    update_sessions(m);
+                Some(_) => {
+                    let _ = incoming_tx_clone.try_send(IncomingEvent::RefreshSessions);
                 }
                 None => {
                     eprintln!("SessionsChanged event handler received None");
@@ -75,9 +81,6 @@ pub async fn listener(
             Ok(())
         }))
         .expect("Failed to set SessionsChanged event handler");
-
-    // force update on start
-    update_sessions(&manager);
 
     let session_events = async {
         while let Some(event) = incoming_rx.recv().await {
@@ -97,7 +100,7 @@ pub async fn listener(
                     }
                 }
                 IncomingEvent::RefreshSessions => {
-                    update_sessions(&manager);
+                    update_sessions(&manager, is_app_allowed);
                 }
 
                 IncomingEvent::Shutdown => {
@@ -166,7 +169,7 @@ pub async fn listener(
     };
 
     // other listeners
-    let ipc_commands = ipc::commands_listener(move |command: String, arg: String| {
+    let ipc_commands = ipc::commands_listener(|command: String, arg: String| {
         let event = JniCallback::IpcCallback(command, arg);
         let _ = OUTGOING_PLAYER_EVENT_TX.get().unwrap().try_send(event);
     });
@@ -183,7 +186,10 @@ pub async fn listener(
     Ok(())
 }
 
-fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
+fn update_sessions(
+    manager: &GlobalSystemMediaTransportControlsSessionManager,
+    is_app_allowed: impl Fn(&str) -> bool,
+) {
     let mut app_names_cache = APP_NAMES_CACHE.lock().unwrap();
 
     // let old_session_infos = SESSION_INFOS.lock().unwrap().clone();
@@ -274,7 +280,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .PlaybackInfoChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
                 PlaybackInfoChangedEventArgs,
-            >::new(move |session, _| {
+            >::new(|session, _| {
                 match session.as_ref() {
                     Some(session) => {
                         handle_playback_info_changed(session);
@@ -291,7 +297,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .MediaPropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
                 MediaPropertiesChangedEventArgs,
-            >::new(move |session, _| {
+            >::new(|session, _| {
                 match session.as_ref() {
                     Some(session) => {
                         handle_media_properties_changed(session);
@@ -308,7 +314,7 @@ fn update_sessions(manager: &GlobalSystemMediaTransportControlsSessionManager) {
             .TimelinePropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
                 TimelinePropertiesChangedEventArgs,
-            >::new(move |session, _| {
+            >::new(|session, _| {
                 match session.as_ref() {
                     Some(session) => {
                         handle_timeline_properties_changed(session);
@@ -409,27 +415,27 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
     }
 }
 
-fn read_stream_to_vec(
-    stream: &IRandomAccessStreamWithContentType,
-) -> windows::core::Result<Vec<u8>> {
-    let size = stream.Size()? as u32;
+// fn read_stream_to_vec(
+//     stream: &IRandomAccessStreamWithContentType,
+// ) -> windows::core::Result<Vec<u8>> {
+//     let size = stream.Size()? as u32;
 
-    if size > MAX_ART_BYTES.try_into().unwrap() {
-        eprintln!("Stream size exceeds maximum allowed size");
-        return Ok(vec![]);
-    }
+//     if size > MAX_ART_BYTES.try_into().unwrap() {
+//         eprintln!("Stream size exceeds maximum allowed size");
+//         return Ok(vec![]);
+//     }
 
-    let buffer = Buffer::Create(size)?;
-    let input_stream = stream.CloneStream()?;
-    let read_op = input_stream.ReadAsync(&buffer, size, InputStreamOptions::None)?;
-    let buffer = read_op.join()?;
+//     let buffer = Buffer::Create(size)?;
+//     let input_stream = stream.CloneStream()?;
+//     let read_op = input_stream.ReadAsync(&buffer, size, InputStreamOptions::None)?;
+//     let buffer = read_op.join()?;
 
-    // Use DataReader to read bytes from the buffer
-    let data_reader = DataReader::FromBuffer(&buffer)?;
-    let mut data = vec![0u8; buffer.Length()? as usize];
-    data_reader.ReadBytes(&mut data)?;
-    Ok(data)
-}
+//     // Use DataReader to read bytes from the buffer
+//     let data_reader = DataReader::FromBuffer(&buffer)?;
+//     let mut data = vec![0u8; buffer.Length()? as usize];
+//     data_reader.ReadBytes(&mut data)?;
+//     Ok(data)
+// }
 
 fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsSession) {
     let media_properties = session
@@ -454,24 +460,24 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             .to_string();
         let track_number = media_properties.TrackNumber().unwrap_or_default();
 
-        let thumbnail = if *ALBUM_ART_ENABLED.lock().unwrap()
-            && let Ok(thumbnail) = media_properties.Thumbnail()
-        {
-            let read_async = thumbnail.OpenReadAsync();
-            if let Ok(read_async) = read_async {
-                if let Ok(stream) = read_async.join() {
-                    read_stream_to_vec(&stream)
-                        .map(Some)
-                        .unwrap_or_else(|_| None)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // let thumbnail = if *ALBUM_ART_ENABLED.lock().unwrap()
+        //     && let Ok(thumbnail) = media_properties.Thumbnail()
+        // {
+        //     let read_async = thumbnail.OpenReadAsync();
+        //     if let Ok(read_async) = read_async {
+        //         if let Ok(stream) = read_async.join() {
+        //             read_stream_to_vec(&stream)
+        //                 .map(Some)
+        //                 .unwrap_or_else(|_| None)
+        //         } else {
+        //             None
+        //         }
+        //     } else {
+        //         None
+        //     }
+        // } else {
+        //     None
+        // };
 
         // let genres = media_properties
         //     .Genres()
@@ -498,7 +504,6 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             track_number,
             duration: existing_duration, // this will be updated later from timeline properties
             art_url: String::new(),      // not used in windows
-            art_bytes: thumbnail.unwrap_or_default(),
         };
 
         cache.insert(app_id.clone(), metadata_info.clone());

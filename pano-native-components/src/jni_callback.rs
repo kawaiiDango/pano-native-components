@@ -10,4 +10,5 @@ pub enum JniCallback {
     PlaybackStateChanged(String, PlaybackInfo),
     IpcCallback(String, String),
     DarkModeChanged(bool),
+    IsAppIdAllowed(String),
 }

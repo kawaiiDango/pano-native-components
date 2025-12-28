@@ -23,7 +23,6 @@ use media_events::IncomingEvent;
 use media_listener::listener;
 use tokio::sync::mpsc;
 
-use std::collections::HashSet;
 use std::env;
 use std::sync::{LazyLock, Mutex};
 
@@ -32,8 +31,6 @@ use crate::media_events::{MetadataInfo, PlaybackInfo};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
-static APP_IDS_ALLOW_LIST: LazyLock<Mutex<HashSet<String>>> =
-    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 // This `#[no_mangle]` keeps rust from "mangling" the name and making it unique
 // for this crate. The name follow a strict naming convention so that the
@@ -79,26 +76,11 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_ping<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setAllowedAppIds(
-    mut env: JNIEnv,
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_refreshSessions(
+    _env: JNIEnv,
     _class: JClass,
-    app_ids: JObjectArray, // this is a java string array
 ) {
-    // replace the current allow list with the new one
-    let mut new_allow_list = HashSet::<String>::new();
-    for i in 0..env.get_array_length(&app_ids).unwrap() {
-        let value = env.get_object_array_element(&app_ids, i);
-        let app_id = value.unwrap();
-        let app_id = env.get_string(&JString::from(app_id)).unwrap().into();
-        new_allow_list.insert(app_id);
-    }
-
-    *APP_IDS_ALLOW_LIST.lock().unwrap() = new_allow_list;
     send_incoming_event(IncomingEvent::RefreshSessions);
-}
-
-pub fn is_app_allowed(app_id: &str) -> bool {
-    APP_IDS_ALLOW_LIST.lock().unwrap().contains(app_id)
 }
 
 #[unsafe(no_mangle)]
@@ -373,7 +355,7 @@ pub fn send_incoming_event(incoming_event: IncomingEvent) {
     }
 }
 
-fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
+fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
     let result = match event {
         JniCallback::SessionsChanged(app_ids_to_names) => {
             let string_class = env.find_class("java/lang/String").unwrap();
@@ -424,7 +406,6 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
                 track_number,
                 duration,
                 art_url,
-                art_bytes,
             },
         ) => {
             let app_id = env.new_string(app_id).unwrap();
@@ -436,12 +417,11 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
             let track_number = *track_number as jint;
             let duration = *duration as jlong;
             let art_url = env.new_string(art_url).unwrap();
-            let art_bytes = env.byte_array_from_slice(art_bytes).unwrap();
             env.call_static_method(
                     "com/arn/scrobble/PanoNativeComponents",
                     "onMetadataChanged",
-                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLjava/lang/String;[B)V",
-                    &[(&app_id).into(), (&track_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into(), (&art_url).into(), (&art_bytes).into()],
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLjava/lang/String;)V",
+                    &[(&app_id).into(), (&track_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into(), (&art_url).into()],
                 )
         }
         JniCallback::PlaybackStateChanged(
@@ -513,11 +493,27 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) {
                 &[is_dark_mode.into()],
             )
         }
+
+        JniCallback::IsAppIdAllowed(app_id) => {
+            let app_id_j = env.new_string(app_id).unwrap();
+            env.call_static_method(
+                "com/arn/scrobble/PanoNativeComponents",
+                "isAppIdAllowed",
+                "(Ljava/lang/String;)Z",
+                &[(&app_id_j).into()],
+            )
+        }
     };
 
     if let Err(e) = result {
         eprintln!("Error calling java method: {e}");
+    } else if let Ok(ret_val) = result
+        && let JniCallback::IsAppIdAllowed(_) = event
+    {
+        return Some(ret_val.z().unwrap_or(false));
     }
+
+    None
 }
 
 #[unsafe(no_mangle)]
@@ -526,9 +522,9 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
     _class: JClass,
 ) {
     let jvm = env.get_java_vm().unwrap();
-    if let Err(e) = listener(move |event| {
+    if let Err(e) = listener(move |event| -> Option<bool> {
         let mut env = jvm.attach_current_thread().unwrap();
-        call_java_fn(&mut env, &event);
+        call_java_fn(&mut env, &event)
     }) {
         eprintln!("Error listening for media: {e}");
     }
