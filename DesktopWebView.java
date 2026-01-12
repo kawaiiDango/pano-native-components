@@ -6,11 +6,9 @@ package com.arn.scrobble;
 public class DesktopWebView {
     private static native void startEventLoop();
 
-    static native void launchWebView(String url, String callbackPrefix, String dataDir);
+    static native void launchWebView(String url, String callbackPrefix, String cookiesUrl, String dataDir);
 
-    static native void getWebViewCookiesFor(String url);
-
-    static native void quitWebView();
+    static native void deleteAndQuit();
 
     static {
         System.loadLibrary("native_webview");
@@ -43,15 +41,11 @@ public class DesktopWebView {
         quitWebView();
     }
 
-    public static void onWebViewCookies(String url, String[] cookies) {
-        System.out.println("onWebViewCookies: " + url);
+    public static void onCallback(String url, String[] cookies) {
+        System.out.println("onCallback: " + url);
         for (String cookie : cookies) {
             System.out.println("Cookie: " + cookie);
         }
-    }
-
-    public static void onWebViewUrlLoaded(String url) {
-        System.out.println("onWebViewUrlLoaded: " + url);
     }
 
 }

@@ -167,7 +167,7 @@ pub async fn listener(
                     dbus_names_to_identities.write().await.clear();
 
                     // produce some error to stop the tasks
-                    return zbus::Result::Err(zbus::Error::Unsupported);
+                    return Result::Err(std::io::Error::other("Shutting down MPRIS listener"));
                 }
 
                 IncomingEvent::LaunchFilePicker(request_id, save, title, file_name, filters) => {

@@ -1,12 +1,10 @@
 #[derive(Debug, Clone)]
 pub enum WebViewIncomingEvent {
-    LaunchWebView(String, String, String),
-    WebViewCookiesFor(String),
-    WebViewUrlLoaded(String),
-    QuitWebView,
+    LaunchWebView(String, String, String, String),
+    SendCallback(String, String),
+    DeleteAndQuit,
 }
 #[derive(Debug)]
 pub enum WebViewOutgoingEvent {
-    WebViewCookies(String, Vec<String>),
-    WebViewUrlLoaded(String),
+    WebViewCallback(String, Vec<String>),
 }

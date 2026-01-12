@@ -73,6 +73,7 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
             Event::UserEvent(WebViewIncomingEvent::LaunchWebView(
                 url,
                 callback_prefix,
+                cookies_url,
                 data_dir,
             )) => {
                 let window = WindowBuilder::new()
@@ -91,8 +92,9 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                         let is_callback = url.starts_with(&callback_prefix);
 
                         if is_callback {
-                            send_incoming_webview_event(WebViewIncomingEvent::WebViewUrlLoaded(
+                            send_incoming_webview_event(WebViewIncomingEvent::SendCallback(
                                 url,
+                                cookies_url.clone(),
                             ));
                             false
                         } else {
@@ -121,15 +123,10 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                 }
             }
 
-            Event::UserEvent(WebViewIncomingEvent::WebViewUrlLoaded(url)) => {
-                let new_event = WebViewOutgoingEvent::WebViewUrlLoaded(url);
-                jni_callback(new_event);
-            }
-
-            Event::UserEvent(WebViewIncomingEvent::WebViewCookiesFor(url)) => {
+            Event::UserEvent(WebViewIncomingEvent::SendCallback(url, cookies_url)) => {
                 if let Some((_, webview, _)) = &webview_window {
-                    let cookies = get_cookies_for_url(webview, &url);
-                    let new_event = WebViewOutgoingEvent::WebViewCookies(url, cookies);
+                    let cookies = get_cookies_for_url(webview, &cookies_url);
+                    let new_event = WebViewOutgoingEvent::WebViewCallback(url, cookies);
                     jni_callback(new_event);
                 }
             }
@@ -140,7 +137,10 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                 }
             }
 
-            Event::UserEvent(WebViewIncomingEvent::QuitWebView) => {
+            Event::UserEvent(WebViewIncomingEvent::DeleteAndQuit) => {
+                if let Some((_, webview, _)) = &webview_window {
+                    let _ = webview.clear_all_browsing_data();
+                }
                 webview_window.take();
             }
 

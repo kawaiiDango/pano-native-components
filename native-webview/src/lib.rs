@@ -25,7 +25,7 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_startEventLoop(
         let mut env = jvm.attach_current_thread().unwrap();
 
         match event {
-            WebViewOutgoingEvent::WebViewCookies(url, cookies_vec) => {
+            WebViewOutgoingEvent::WebViewCallback(url, cookies_vec) => {
                 let desktop_webview_class =
                     env.find_class("com/arn/scrobble/DesktopWebView").unwrap();
                 let string_class = env.find_class("java/lang/String").unwrap();
@@ -44,22 +44,9 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_startEventLoop(
 
                 env.call_static_method(
                     desktop_webview_class,
-                    "onWebViewCookies",
+                    "onCallback",
                     "(Ljava/lang/String;[Ljava/lang/String;)V",
                     &[(&url).into(), (&cookies).into()],
-                )
-                .unwrap();
-            }
-
-            WebViewOutgoingEvent::WebViewUrlLoaded(url) => {
-                let class = env.find_class("com/arn/scrobble/DesktopWebView").unwrap();
-                let url = env.new_string(url).unwrap();
-
-                env.call_static_method(
-                    class,
-                    "onWebViewUrlLoaded",
-                    "(Ljava/lang/String;)V",
-                    &[(&url).into()],
                 )
                 .unwrap();
             }
@@ -73,6 +60,7 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_launchWebView(
     _class: JClass,
     url: JString,
     callback_prefix: JString,
+    cookies_url: JString,
     data_dir: JString,
 ) {
     let url: String = env
@@ -85,6 +73,11 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_launchWebView(
         .expect("Couldn't get java string!")
         .into();
 
+    let cookies_url: String = env
+        .get_string(&cookies_url)
+        .expect("Couldn't get java string!")
+        .into();
+
     let data_dir: String = env
         .get_string(&data_dir)
         .expect("Couldn't get java string!")
@@ -93,28 +86,15 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_launchWebView(
     tao_loop::send_incoming_webview_event(WebViewIncomingEvent::LaunchWebView(
         url,
         callback_prefix,
+        cookies_url,
         data_dir,
     ));
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_getWebViewCookiesFor(
-    mut env: JNIEnv,
-    _class: JClass,
-    url: JString,
-) {
-    let url: String = env
-        .get_string(&url)
-        .expect("Couldn't get java string!")
-        .into();
-
-    tao_loop::send_incoming_webview_event(WebViewIncomingEvent::WebViewCookiesFor(url));
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_quitWebView(
+pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_deleteAndQuit(
     _env: JNIEnv,
     _class: JClass,
 ) {
-    tao_loop::send_incoming_webview_event(WebViewIncomingEvent::QuitWebView);
+    tao_loop::send_incoming_webview_event(WebViewIncomingEvent::DeleteAndQuit);
 }
