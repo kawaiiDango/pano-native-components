@@ -10,8 +10,22 @@ pub async fn observe(
         use ashpd::desktop::settings::{ColorScheme, Settings};
         use futures_util::StreamExt;
 
-        let settings = Settings::new().await?;
-        let scheme = settings.color_scheme().await?;
+        let settings = match Settings::new().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to connect to Settings XDG portal: {}", e);
+                return Ok(());
+            }
+        };
+
+        let scheme = match settings.color_scheme().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to get color scheme: {}", e);
+                return Ok(());
+            }
+        };
+
         let is_dark_mode = match scheme {
             ColorScheme::PreferDark => true,
             ColorScheme::PreferLight | ColorScheme::NoPreference => false,
@@ -20,7 +34,14 @@ pub async fn observe(
             .send(JniCallback::DarkModeChanged(is_dark_mode))
             .await;
 
-        let mut color_scheme_stream = settings.receive_color_scheme_changed().await?;
+        let mut color_scheme_stream = match settings.receive_color_scheme_changed().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to receive color scheme change stream: {}", e);
+                return Ok(());
+            }
+        };
+
         while let Some(scheme) = color_scheme_stream.next().await {
             let is_dark_mode = match scheme {
                 ColorScheme::PreferDark => true,
