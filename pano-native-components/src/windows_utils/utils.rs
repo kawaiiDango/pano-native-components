@@ -72,7 +72,7 @@ pub fn apply_dark_mode_to_window(handle: i64) {
             std::mem::size_of_val(&use_dark) as u32,
         )
         .unwrap_or_else(|e| {
-            eprintln!("Failed to set DWMWA_USE_IMMERSIVE_DARK_MODE for window {handle}: {e}");
+            log::error!("Failed to set DWMWA_USE_IMMERSIVE_DARK_MODE for window {handle}: {e}");
         });
     }
 }
@@ -88,7 +88,7 @@ pub fn is_file_locked(path: &str) -> bool {
     match file {
         Ok(_) => false,
         Err(err) => {
-            // eprintln!("Error opening file '{path}': {err}");
+            // log::error!("Error opening file '{path}': {err}");
             err.raw_os_error() == Some(32) // ERROR_SHARING_VIOLATION
         }
     }

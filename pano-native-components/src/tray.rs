@@ -19,10 +19,10 @@ static OUTGOING_TRAY_EVENT_TX: OnceLock<mpsc::Sender<JniCallback>> = OnceLock::n
 pub fn update_tray(pano_tray_data: PanoTrayData) {
     if let Some(sender) = TOKIO_USER_EVENT_SENDER.get() {
         sender.try_send(pano_tray_data).unwrap_or_else(|_| {
-            eprintln!("Failed to send tray event");
+            log::error!("Failed to send tray event");
         });
     } else {
-        eprintln!("Event loop not running");
+        log::error!("Event loop not running");
     }
 }
 
@@ -104,7 +104,7 @@ pub async fn tray_listener(
                     let _ = tray_handle.set(handle);
                 }
                 Err(e) => {
-                    eprintln!("Failed to spawn tray: {e}");
+                    log::error!("Failed to spawn tray: {e}");
                 }
             }
         } else if let Some(handle) = tray_handle.get() {

@@ -75,7 +75,7 @@ pub async fn listener(
                     let _ = incoming_tx_clone.try_send(IncomingEvent::RefreshSessions);
                 }
                 None => {
-                    eprintln!("SessionsChanged event handler received None");
+                    log::error!("SessionsChanged event handler received None");
                 }
             }
             Ok(())
@@ -149,7 +149,7 @@ pub async fn listener(
                         .app_id(AUMID);
 
                     if let Err(e) = notification.show() {
-                        eprintln!("Error showing notification: {e:?}");
+                        log::error!("Error showing notification: {e:?}");
                     }
                 }
 
@@ -286,7 +286,7 @@ fn update_sessions(
                         handle_playback_info_changed(session);
                     }
                     None => {
-                        eprintln!("PlaybackInfoChanged event handler received None");
+                        log::error!("PlaybackInfoChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -303,7 +303,7 @@ fn update_sessions(
                         handle_media_properties_changed(session);
                     }
                     None => {
-                        eprintln!("MediaPropertiesChanged event handler received None");
+                        log::error!("MediaPropertiesChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -320,7 +320,7 @@ fn update_sessions(
                         handle_timeline_properties_changed(session);
                     }
                     None => {
-                        eprintln!("TimelinePropertiesChanged event handler received None");
+                        log::error!("TimelinePropertiesChanged event handler received None");
                     }
                 }
                 Ok(())
@@ -411,7 +411,7 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
             .unwrap()
             .try_send(JniCallback::PlaybackStateChanged(app_id, playback_info));
     } else {
-        eprintln!("Failed to get playback state");
+        log::error!("Failed to get playback state");
     }
 }
 
@@ -421,7 +421,7 @@ fn handle_playback_info_changed(session: &GlobalSystemMediaTransportControlsSess
 //     let size = stream.Size()? as u32;
 
 //     if size > MAX_ART_BYTES.try_into().unwrap() {
-//         eprintln!("Stream size exceeds maximum allowed size");
+//         log::error!("Stream size exceeds maximum allowed size");
 //         return Ok(vec![]);
 //     }
 
@@ -513,7 +513,7 @@ fn handle_media_properties_changed(session: &GlobalSystemMediaTransportControlsS
             .unwrap()
             .try_send(JniCallback::MetadataChanged(app_id, metadata_info));
     } else {
-        eprintln!("Failed to get media properties");
+        log::error!("Failed to get media properties");
     }
 }
 
@@ -601,6 +601,6 @@ fn handle_timeline_properties_changed(session: &GlobalSystemMediaTransportContro
             }
         }
     } else {
-        eprintln!("Failed to get timeline properties");
+        log::error!("Failed to get timeline properties");
     }
 }

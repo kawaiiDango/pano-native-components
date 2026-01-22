@@ -205,7 +205,7 @@ pub async fn listener(
                     }
 
                     if let Err(e) = notification.show_async().await {
-                        eprintln!("Error showing notification: {e:?}");
+                        log::error!("Error showing notification: {e:?}");
                     }
                 }
             }

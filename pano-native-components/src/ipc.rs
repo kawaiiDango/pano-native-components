@@ -25,7 +25,7 @@ pub async fn commands_listener(
     let listener = match listener {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Error creating pipe listener: {e}");
+            log::error!("Error creating pipe listener: {e}");
             return Ok(()); // dont actually return the error, as I will be using try_join
         }
     };
@@ -50,13 +50,13 @@ pub async fn commands_listener(
                         buffer.clear();
                     }
                     Err(e) => {
-                        eprintln!("Error reading from pipe: {e}");
+                        log::error!("Error reading from pipe: {e}");
                         buffer.clear();
                     }
                 }
             }
             Err(e) => {
-                eprintln!("There was an error with an incoming connection: {e}");
+                log::error!("There was an error with an incoming connection: {e}");
                 continue;
             }
         };
@@ -74,8 +74,8 @@ async fn connect() -> Result<interprocess::local_socket::tokio::Stream, Box<dyn 
     .await
     {
         Ok(Ok(stream)) => Ok(stream),
-        Err(e) => Err(Box::new(e)),
-        Ok(Err(e)) => Err(Box::new(e)),
+        Ok(Err(e)) => Err(Box::from(e)),
+        Err(e) => Err(Box::from(e)),
     }
 }
 

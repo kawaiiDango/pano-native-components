@@ -7,7 +7,7 @@ import java.util.Arrays;
 // this class is just useed for testing
 
 public class PanoNativeComponents {
-    private static native String ping(String input);
+    private static native void setLogFilePath(String path);
 
     private static native void startListeningMedia();
 
@@ -65,7 +65,6 @@ public class PanoNativeComponents {
     ));
 
     public static void main(String[] args) {
-        System.out.println(ping("🪼hello " + getMachineId()));
         applyDarkModeToWindow(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
 

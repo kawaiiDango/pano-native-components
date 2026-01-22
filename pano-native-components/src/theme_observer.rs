@@ -13,7 +13,7 @@ pub async fn observe(
         let settings = match Settings::new().await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Failed to connect to Settings XDG portal: {}", e);
+                log::error!("Failed to connect to Settings XDG portal: {}", e);
                 return Ok(());
             }
         };
@@ -21,7 +21,7 @@ pub async fn observe(
         let scheme = match settings.color_scheme().await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Failed to get color scheme: {}", e);
+                log::error!("Failed to get color scheme: {}", e);
                 return Ok(());
             }
         };
@@ -37,7 +37,7 @@ pub async fn observe(
         let mut color_scheme_stream = match settings.receive_color_scheme_changed().await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Failed to receive color scheme change stream: {}", e);
+                log::error!("Failed to receive color scheme change stream: {}", e);
                 return Ok(());
             }
         };

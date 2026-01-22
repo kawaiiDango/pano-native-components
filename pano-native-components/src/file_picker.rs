@@ -29,7 +29,7 @@ pub async fn launch_file_picker(
                 .map(|u| u.to_string())
                 .unwrap_or_default(),
             Err(err) => {
-                eprintln!("Failed to open a file: {err}");
+                log::error!("Failed to open a file: {err}");
                 "".to_string()
             }
         }
@@ -51,7 +51,7 @@ pub async fn launch_file_picker(
                 .map(|u| u.to_string())
                 .unwrap_or_default(),
             Err(err) => {
-                eprintln!("Failed to open a file: {err}");
+                log::error!("Failed to open a file: {err}");
                 "".to_string()
             }
         }

@@ -13,12 +13,14 @@ mod jni_callback;
 mod theme_observer;
 mod windows_utils;
 
+use ftail::Ftail;
 use jni::sys::{jboolean, jint, jlong};
 
 use jni::JNIEnv;
 use jni::objects::{JClass, JIntArray, JObject, JObjectArray, JString};
 
 use jni_callback::JniCallback;
+use log::LevelFilter;
 use media_events::IncomingEvent;
 use media_listener::listener;
 use tokio::sync::mpsc;
@@ -32,55 +34,29 @@ use crate::media_events::{MetadataInfo, PlaybackInfo};
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingEvent>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-// This `#[no_mangle]` keeps rust from "mangling" the name and making it unique
-// for this crate. The name follow a strict naming convention so that the
-// JNI implementation will be able to automatically find the implementation
-// of a native method based on its name.
-//
-// The `'local` lifetime here represents the local frame within which any local
-// (temporary) references to Java objects will remain valid.
-//
-// It's usually not necessary to explicitly name the `'local` input lifetimes but
-// in this case we want to return a reference and show the compiler what
-// local frame lifetime it is associated with.
-//
-// Alternatively we could instead return the `jni::sys::jstring` type instead
-// which would represent the same thing as a raw pointer, without any lifetime,
-// and at the end use `.into_raw()` to convert a local reference with a lifetime
-// into a raw pointer.
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_ping<'local>(
-    // Notice that this `env` argument is mutable. Any `JNIEnv` API that may
-    // allocate new object references will take a mutable reference to the
-    // environment.
-    mut env: JNIEnv<'local>,
-    // this is the class that owns our static method. Not going to be used, but
-    // still needs to have an argument slot
-    _class: JClass<'local>,
-    input: JString<'local>,
-) -> JString<'local> {
-    // First, we have to get the string out of java. Check out the `strings`
-    // module for more info on how this works.
-    let input: String = env
-        .get_string(&input)
-        .expect("Couldn't get java string!")
-        .into();
-
-    // Then we have to create a new java string to return. Again, more info
-    // in the `strings` module.
-
-    println!("Ping: {input}");
-
-    env.new_string(input).expect("Couldn't create java string!")
-}
-
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_refreshSessions(
     _env: JNIEnv,
     _class: JClass,
 ) {
     send_incoming_event(IncomingEvent::RefreshSessions);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setLogFilePath(
+    mut env: JNIEnv,
+    _class: JClass,
+    path: JString,
+) {
+    let path: String = env.get_string(&path).unwrap().into();
+    let path = std::path::PathBuf::from(path);
+
+    Ftail::new()
+        .console(LevelFilter::Warn) // log to console
+        .single_file(&path, true, LevelFilter::Warn)
+        .max_file_size(1)
+        .init()
+        .expect("Failed to initialize logger"); // initialize logger
 }
 
 #[unsafe(no_mangle)]
@@ -268,7 +244,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand
         Ok(_) => 1, // true
         Err(e) => {
             if command != "focus-existing" {
-                eprintln!("Error sending ipc command: {e}");
+                log::error!("Error sending ipc command: {e}");
             }
             0 // false
         }
@@ -348,10 +324,10 @@ pub fn send_incoming_event(incoming_event: IncomingEvent) {
     if let Some(ref sender) = *tx {
         match sender.try_send(incoming_event) {
             Ok(_) => {}
-            Err(e) => eprintln!("Error sending message to channel: {e}"),
+            Err(e) => log::error!("Error sending message to channel: {e}"),
         }
     } else {
-        eprintln!("Sender not initialized, did not send {incoming_event:?}");
+        log::error!("Sender not initialized, did not send {incoming_event:?}");
     }
 }
 
@@ -506,7 +482,7 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
     };
 
     if let Err(e) = result {
-        eprintln!("Error calling java method: {e}");
+        log::error!("Error calling java method: {e}");
     } else if let Ok(ret_val) = result
         && let JniCallback::IsAppIdAllowed(_) = event
     {
@@ -526,7 +502,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_startListening
         let mut env = jvm.attach_current_thread().unwrap();
         call_java_fn(&mut env, &event)
     }) {
-        eprintln!("Error listening for media: {e}");
+        log::error!("Error listening for media: {e}");
     }
 }
 

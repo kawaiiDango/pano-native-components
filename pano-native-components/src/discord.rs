@@ -104,7 +104,7 @@ pub fn discord_rpc(activity: DiscordActivity) -> Result<(), error::Error> {
                 }
 
                 Err(e) => {
-                    eprintln!("Failed to set Discord activity: {e}");
+                    log::error!("Failed to set Discord activity: {e}");
                 }
             }
         }
