@@ -7,7 +7,7 @@ mod file_picker;
 #[cfg(target_os = "linux")]
 mod tray;
 
-mod discord;
+mod discord_rpc;
 mod ipc;
 mod jni_callback;
 mod theme_observer;
@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 use std::env;
 use std::sync::{LazyLock, Mutex};
 
-use crate::discord::DiscordActivity;
+use crate::discord_rpc::DiscordActivity;
 use crate::media_events::{MetadataInfo, PlaybackInfo};
 
 static INCOMING_PLAYER_EVENT_TX: LazyLock<Mutex<Option<mpsc::Sender<IncomingEvent>>>> =
@@ -511,19 +511,25 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordA
     mut env: JNIEnv,
     _class: JClass,
     client_id: JString,
+    name: JString,
     state: JString,
     details: JString,
     large_text: JString,
     start_time: jlong,
     end_time: jlong,
     art_url: JString,
+    details_url: JString,
     is_playing: jboolean,
     status_line: jint,
-    button_texts: JObjectArray,
-    button_urls: JObjectArray,
+    button_text: JString,
+    button_url: JString,
 ) -> jboolean {
     let client_id: String = env
         .get_string(&client_id)
+        .expect("Couldn't get java string!")
+        .into();
+    let name: String = env
+        .get_string(&name)
         .expect("Couldn't get java string!")
         .into();
     let state: String = env
@@ -542,70 +548,48 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_updateDiscordA
         .get_string(&art_url)
         .expect("Couldn't get java string!")
         .into();
-
-    let art_url = if art_url.is_empty() {
-        None
-    } else {
-        Some(art_url)
-    };
+    let details_url: String = env
+        .get_string(&details_url)
+        .expect("Couldn't get java string!")
+        .into();
+    let button_text: String = env
+        .get_string(&button_text)
+        .expect("Couldn't get java string!")
+        .into();
+    let button_url: String = env
+        .get_string(&button_url)
+        .expect("Couldn't get java string!")
+        .into();
 
     let end_time = if end_time > 0 { Some(end_time) } else { None };
     let is_playing = is_playing != 0;
 
-    let buttons_texts_and_urls = if button_texts.is_null() || button_urls.is_null() {
-        Vec::new()
-    } else {
-        let len_texts = env.get_array_length(&button_texts).unwrap();
-        let len_urls = env.get_array_length(&button_urls).unwrap();
-        let len = len_texts.min(len_urls);
-
-        let mut buttons = Vec::with_capacity(len.try_into().unwrap());
-
-        for i in 0..len {
-            let text_obj = env.get_object_array_element(&button_texts, i).unwrap();
-            let url_obj = env.get_object_array_element(&button_urls, i).unwrap();
-
-            let text: String = env.get_string(&JString::from(text_obj)).unwrap().into();
-            let url: String = env.get_string(&JString::from(url_obj)).unwrap().into();
-
-            if !text.is_empty() && !url.is_empty() {
-                buttons.push((text, url));
-            }
-        }
-
-        buttons
-    };
-
-    let activity = DiscordActivity::Playing {
+    let activity = DiscordActivity {
         client_id,
+        name,
         state,
         details,
         large_text,
         start_time,
         end_time,
         art_url,
+        details_url,
         status_line,
         is_playing,
-        buttons_texts_and_urls,
+        button_text,
+        button_url,
     };
 
-    discord::discord_rpc(activity).is_ok() as jboolean
+    discord_rpc::update(activity).is_ok() as jboolean
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_clearDiscordActivity(
     _env: JNIEnv,
     _class: JClass,
+    shutdown: jboolean,
 ) -> jboolean {
-    discord::discord_rpc(DiscordActivity::Clear).is_ok() as jboolean
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_stopDiscordActivity(
-    _env: JNIEnv,
-    _class: JClass,
-) -> jboolean {
-    discord::discord_rpc(DiscordActivity::Stop).is_ok() as jboolean
+    discord_rpc::clear(shutdown != 0).is_ok() as jboolean
 }
 
 #[unsafe(no_mangle)]

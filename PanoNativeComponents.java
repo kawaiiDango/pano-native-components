@@ -39,11 +39,9 @@ public class PanoNativeComponents {
 
     static native void onFilePicked(int requestId, String uri);
 
-    static native boolean updateDiscordActivity(String clientId, String state, String details, String largeText, long startTime, long endTime, String artUrl, boolean isPlaying, int statusLine, String[] buttonTexts, String[] buttonUrls);
+    static native boolean updateDiscordActivity(String clientId, String name, String state, String details, String largeText, long startTime, long endTime, String artUrl, String detailsUrl, boolean isPlaying, int statusLine, String buttonText, String buttonUrl);
 
-    static native boolean clearDiscordActivity();
-
-    static native boolean stopDiscordActivity();
+    static native boolean clearDiscordActivity(boolean shutdown);
 
     static {
         System.loadLibrary("pano_native_components");
