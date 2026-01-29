@@ -12,13 +12,13 @@ jni = "0.21"
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.49", features = ["rt", "sync", "macros", "time"] }
 interprocess = { version = "2.2", features = ["tokio"] }
-discord-rich-presence = "1.0"
+discord-rich-presence = "1.1"
 notify-rust = "4"
 log = "0.4"
 ftail = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.12", default-features = false, features = ["async-io"] }
+zbus = { version = "5.13", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
 ashpd = "0.12"
