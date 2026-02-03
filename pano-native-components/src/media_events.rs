@@ -26,6 +26,12 @@ pub struct TimelineInfo {
     pub last_updated: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct SessionInfo {
+    pub app_id: String,
+    pub app_name: String,
+}
+
 #[derive(EnumString, strum::Display, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PlaybackState {
     None,

@@ -19,7 +19,7 @@ use zbus::{
 use crate::{
     INCOMING_PLAYER_EVENT_TX, file_picker, ipc,
     jni_callback::JniCallback,
-    media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState},
+    media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo},
     media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
     theme_observer,
 };
@@ -152,11 +152,17 @@ pub async fn listener(
                         }
                     }
 
-                    let active_players = dbus_names_to_identities.read().await.clone();
+                    let session_infos = dbus_names_to_identities
+                        .read()
+                        .await
+                        .iter()
+                        .map(|(dbus_name, identity)| SessionInfo {
+                            app_id: dbus_name.clone(),
+                            app_name: identity.clone(),
+                        })
+                        .collect::<Vec<SessionInfo>>();
 
-                    jni_callback(JniCallback::SessionsChanged(
-                        active_players.into_iter().collect(),
-                    ));
+                    jni_callback(JniCallback::SessionsChanged(session_infos));
                 }
 
                 IncomingEvent::Shutdown => {
@@ -255,13 +261,20 @@ pub async fn listener(
                     .retain(|name, _| *name != dbus_name);
             }
 
-            let active_players = dbus_names_to_identities.read().await.clone();
+            let session_infos = dbus_names_to_identities
+                .read()
+                .await
+                .iter()
+                .map(|(dbus_name, identity)| SessionInfo {
+                    app_id: dbus_name.clone(),
+                    app_name: identity.clone(),
+                })
+                .collect::<Vec<SessionInfo>>();
+
             let _ = OUTGOING_PLAYER_EVENT_TX
                 .get()
                 .unwrap()
-                .try_send(JniCallback::SessionsChanged(
-                    active_players.into_iter().collect(),
-                ));
+                .try_send(JniCallback::SessionsChanged(session_infos));
         }
         Ok::<(), zbus::Error>(())
     };

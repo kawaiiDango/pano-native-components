@@ -51,9 +51,15 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setLogFilePath
     let path: String = env.get_string(&path).unwrap().into();
     let path = std::path::PathBuf::from(path);
 
+    #[cfg(debug_assertions)]
+    let level = LevelFilter::Debug;
+
+    #[cfg(not(debug_assertions))]
+    let level = LevelFilter::Warn;
+
     Ftail::new()
-        .console(LevelFilter::Warn) // log to console
-        .single_file(&path, true, LevelFilter::Warn)
+        .console(level) // log to console
+        .single_file(&path, true, level)
         .max_file_size(1)
         .init()
         .expect("Failed to initialize logger"); // initialize logger
@@ -321,10 +327,12 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isFileLocked(
 pub fn send_incoming_event(incoming_event: IncomingEvent) {
     let tx = INCOMING_PLAYER_EVENT_TX.lock().unwrap();
 
+    log::debug!("Sending message: {:?}", &incoming_event);
+
     if let Some(ref sender) = *tx {
         match sender.try_send(incoming_event) {
             Ok(_) => {}
-            Err(e) => log::error!("Error sending message to channel: {e}"),
+            Err(e) => log::error!("Error sending incoming event: {e}"),
         }
     } else {
         log::error!("Sender not initialized, did not send {incoming_event:?}");
@@ -333,32 +341,24 @@ pub fn send_incoming_event(incoming_event: IncomingEvent) {
 
 fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
     let result = match event {
-        JniCallback::SessionsChanged(app_ids_to_names) => {
+        JniCallback::SessionsChanged(session_infos) => {
             let string_class = env.find_class("java/lang/String").unwrap();
 
             // Create a Java String array
             let app_ids = env
-                .new_object_array(
-                    app_ids_to_names.len() as jint,
-                    &string_class,
-                    JObject::null(),
-                )
+                .new_object_array(session_infos.len() as jint, &string_class, JObject::null())
                 .unwrap();
             let app_names = env
-                .new_object_array(
-                    app_ids_to_names.len() as jint,
-                    &string_class,
-                    JObject::null(),
-                )
+                .new_object_array(session_infos.len() as jint, &string_class, JObject::null())
                 .unwrap();
 
             // Populate the array
-            for (i, (app_id, app_name)) in app_ids_to_names.iter().enumerate() {
-                let j_app_id = env.new_string(app_id).unwrap();
+            for (i, session_info) in session_infos.iter().enumerate() {
+                let j_app_id = env.new_string(&session_info.app_id).unwrap();
                 env.set_object_array_element(&app_ids, i as jint, j_app_id)
                     .unwrap();
 
-                let j_app_name = env.new_string(app_name).unwrap();
+                let j_app_name = env.new_string(&session_info.app_name).unwrap();
                 env.set_object_array_element(&app_names, i as jint, j_app_name)
                     .unwrap();
             }
