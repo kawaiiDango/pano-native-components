@@ -250,7 +250,7 @@ fn session_id(session: &GlobalSystemMediaTransportControlsSession) -> String {
 
 #[derive(Debug)]
 struct SessionTracker {
-    session: Arc<GlobalSystemMediaTransportControlsSession>,
+    session: GlobalSystemMediaTransportControlsSession,
     playback_info_token: i64,
     media_properties_token: i64,
     timeline_properties_token: i64,
@@ -274,14 +274,14 @@ impl Drop for SessionTracker {
 
 impl SessionTracker {
     fn new(session: GlobalSystemMediaTransportControlsSession) -> Self {
-        let session = Arc::new(session);
-
         let playback_info_cached1 = Arc::new(Mutex::<Option<PlaybackInfo>>::new(None));
         let playback_info_cached2 = playback_info_cached1.clone();
         let playback_info_cached3 = playback_info_cached1.clone();
         let metadata_info_cached1 = Arc::new(Mutex::<Option<MetadataInfo>>::new(None));
         let metadata_info_cached2 = metadata_info_cached1.clone();
         let metadata_info_cached3 = metadata_info_cached1.clone();
+        let sess_id = session_id(&session);
+        let id = sess_id.clone();
 
         let playback_info_token = session
             .PlaybackInfoChanged(&TypedEventHandler::<
@@ -295,7 +295,7 @@ impl SessionTracker {
                             *guard = Some(playback_info.clone());
 
                             send_outgoing_event(JniCallback::PlaybackStateChanged(
-                                session_id(session),
+                                id.clone(),
                                 playback_info,
                             ));
                         }
@@ -311,6 +311,7 @@ impl SessionTracker {
                 0
             });
 
+        let id = sess_id.clone();
         let media_properties_token = session
             .MediaPropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
@@ -321,19 +322,18 @@ impl SessionTracker {
                         if let Some(metadata_info) = Self::handle_media_properties_changed(session)
                         {
                             let mut guard = metadata_info_cached1.lock().unwrap();
-                            if let Some(last_metadata_info) = &mut *guard {
-                                let metadata_info = MetadataInfo {
-                                    duration: last_metadata_info.duration,
-                                    ..metadata_info
-                                };
+                            let duration = guard.as_ref().map(|x| x.duration).unwrap_or(-1);
 
-                                *guard = Some(metadata_info.clone());
+                            let metadata_info = MetadataInfo {
+                                duration,
+                                ..metadata_info
+                            };
+                            *guard = Some(metadata_info.clone());
 
-                                send_outgoing_event(JniCallback::MetadataChanged(
-                                    session_id(session),
-                                    metadata_info,
-                                ));
-                            }
+                            send_outgoing_event(JniCallback::MetadataChanged(
+                                id.clone(),
+                                metadata_info,
+                            ));
                         }
                     }
                     None => {
@@ -347,6 +347,7 @@ impl SessionTracker {
                 0
             });
 
+        let id = sess_id.clone();
         let timeline_properties_token = session
             .TimelinePropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
@@ -357,14 +358,13 @@ impl SessionTracker {
                         if let Some((duration, position)) =
                             Self::handle_timeline_properties_changed(session)
                         {
-                            let id = session_id(session);
-
                             // println!("position: {}, duration: {}", position, duration);
 
                             // on windows, the duration may get updated much later than the media properties
 
                             if duration != -1 {
                                 let mut guard = metadata_info_cached2.lock().unwrap();
+
                                 if let Some(last_metadata_info) = &mut *guard
                                     && last_metadata_info.duration != duration
                                 {
@@ -388,15 +388,15 @@ impl SessionTracker {
                                         last_playback_info.clone(),
                                     ));
                                 } else {
-                                    let playback_info = PlaybackInfo {
-                                        state: PlaybackState::None,
-                                        can_skip: false,
-                                        position,
-                                    };
-                                    send_outgoing_event(JniCallback::PlaybackStateChanged(
-                                        id.clone(),
-                                        playback_info,
-                                    ));
+                                    // let playback_info = PlaybackInfo {
+                                    //     state: PlaybackState::None,
+                                    //     can_skip: false,
+                                    //     position,
+                                    // };
+                                    // send_outgoing_event(JniCallback::PlaybackStateChanged(
+                                    //     id.clone(),
+                                    //     playback_info,
+                                    // ));
                                 }
                             }
                         }
@@ -413,7 +413,8 @@ impl SessionTracker {
             });
 
         // initial fetch
-        let id = session_id(&session);
+        let id = sess_id.clone();
+
         let (duration, position) =
             Self::handle_timeline_properties_changed(&session).unwrap_or((-1, -1));
 
@@ -482,10 +483,13 @@ impl SessionTracker {
                 .unwrap_or_else(|_| Ok(false))
                 .unwrap_or_default();
 
+            let (_, position) =
+                Self::handle_timeline_properties_changed(session).unwrap_or((-1, -1));
+
             let playback_info = PlaybackInfo {
                 state,
                 can_skip,
-                position: -1, // this will be updated later from timeline properties
+                position,
             };
 
             Some(playback_info)
