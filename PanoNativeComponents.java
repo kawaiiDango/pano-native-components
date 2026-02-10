@@ -129,8 +129,8 @@ public class PanoNativeComponents {
         }
     }
 
-    public static void onMetadataChanged(String appId, String trackId, String title, String artist, String album, String albumArtist, int trackNumber, long duration, String artUrl) {
-        System.out.println("onMetadataChanged: " + appId + ", " + trackId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration + ", " + artUrl);
+    public static void onMetadataChanged(String appId, String title, String artist, String album, String albumArtist, int trackNumber, long duration, String artUrl, String trackUrl) {
+        System.out.println("onMetadataChanged: " + appId + ", " + title + ", " + artist + ", " + album + ", " + albumArtist + ", " + trackNumber + ", " + duration + ", " + artUrl + ", " + trackUrl);
     }
 
     public static void onPlaybackStateChanged(String appId, String state, long position, boolean canSkip) {

@@ -557,7 +557,6 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
     let art_url = metadata.art_url().take_if(|x| x.len() < 1000);
 
     MetadataInfo {
-        track_id: metadata.track_id().unwrap_or_default().to_string(),
         title: metadata.title().unwrap_or_default().to_string(),
         artist: first_artist.unwrap_or_default(),
         album: metadata.album_name().unwrap_or_default().to_string(),
@@ -568,6 +567,7 @@ fn parse_metadata(metadata: HashMap<String, zvariant::OwnedValue>) -> MetadataIn
             .map(|x| x.as_millis().try_into().unwrap_or(-1))
             .unwrap_or(-1),
         art_url: art_url.unwrap_or_default().to_string(),
+        track_url: metadata.url().unwrap_or_default().to_string(),
     }
 }
 

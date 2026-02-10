@@ -374,7 +374,6 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
         JniCallback::MetadataChanged(
             app_id,
             MetadataInfo {
-                track_id,
                 title,
                 artist,
                 album,
@@ -382,10 +381,11 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
                 track_number,
                 duration,
                 art_url,
+                track_url,
             },
         ) => {
             let app_id = env.new_string(app_id).unwrap();
-            let track_id = env.new_string(track_id).unwrap();
+            let track_url = env.new_string(track_url).unwrap();
             let title = env.new_string(title).unwrap();
             let artist = env.new_string(artist).unwrap();
             let album = env.new_string(album).unwrap();
@@ -396,8 +396,8 @@ fn call_java_fn(env: &mut JNIEnv, event: &JniCallback) -> Option<bool> {
             env.call_static_method(
                     "com/arn/scrobble/PanoNativeComponents",
                     "onMetadataChanged",
-                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLjava/lang/String;)V",
-                    &[(&app_id).into(), (&track_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into(), (&art_url).into()],
+                    "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;IJLjava/lang/String;Ljava/lang/String;)V",
+                    &[(&app_id).into(), (&title).into(), (&artist).into(), (&album).into(), (&album_artist).into(), track_number.into(), duration.into(), (&art_url).into(), (&track_url).into(),],
                 )
         }
         JniCallback::PlaybackStateChanged(

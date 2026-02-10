@@ -551,14 +551,14 @@ impl SessionTracker {
             // get the existing duration if available
 
             let metadata_info = MetadataInfo {
-                track_id: "".to_string(), // track_id is not available in SMTC
                 title,
                 artist,
                 album,
                 album_artist,
                 track_number,
                 duration: -1, // this will be updated later from timeline properties
-                art_url: String::new(), // not used in windows
+                art_url: String::new(), // not used on windows
+                track_url: String::new(), // not used on windows
             };
             Some(metadata_info)
         } else {
