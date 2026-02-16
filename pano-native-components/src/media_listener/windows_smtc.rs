@@ -570,7 +570,14 @@ impl SessionTracker {
     fn handle_timeline_properties_changed(
         session: &GlobalSystemMediaTransportControlsSession,
     ) -> Option<(i64, i64)> {
-        if let Ok(timeline_properties) = session.GetTimelineProperties() {
+        // check for LastUpdatedTime as players that don't report timeline properties return an Ok() but everything is 0
+        if let Ok(timeline_properties) = session.GetTimelineProperties()
+            && timeline_properties
+                .LastUpdatedTime()
+                .unwrap_or_default()
+                .UniversalTime
+                != 0
+        {
             // Duration is in ns, convert to ms
             // some players dont report timeline properties, handle that with -1
             let end_time = timeline_properties
@@ -595,7 +602,6 @@ impl SessionTracker {
 
             Some((duration, position))
         } else {
-            log::error!("Failed to get timeline properties");
             None
         }
     }
