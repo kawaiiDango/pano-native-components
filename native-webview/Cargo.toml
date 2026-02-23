@@ -8,7 +8,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-jni = "0.21"
+jni = "0.22"
 wry = { version = "0.54", default-features = false, features = [
     "os-webview",
     "protocol",
