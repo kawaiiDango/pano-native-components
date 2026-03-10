@@ -1,16 +1,23 @@
-use std::sync::OnceLock;
-
+use crate::jni_callback::JniCallback;
+use image::GenericImageView;
+use ksni::{Icon, MenuItem, TrayMethods, menu::StandardItem};
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::OnceLock,
+};
 use tokio::sync::mpsc;
 
 pub struct PanoTrayData {
     pub tooltip: String,
-    pub icon_argb: Vec<u8>,
-    pub icon_dim: u32,
+    pub png_bytes: Vec<u8>,
+    pub invert: bool,
     pub menu_items: Vec<(String, String)>,
 }
 
 struct PanoTray {
     pub data: PanoTrayData,
+    pub prev_icon_hash: u64,
+    pub prev_icon: Option<Icon>,
 }
 
 static TOKIO_USER_EVENT_SENDER: OnceLock<mpsc::Sender<PanoTrayData>> = OnceLock::new();
@@ -26,20 +33,45 @@ pub fn update_tray(pano_tray_data: PanoTrayData) {
     }
 }
 
-use ksni::{Icon, MenuItem, TrayMethods, menu::StandardItem};
+fn compute_icon(png_bytes: &[u8], invert: bool) -> (Option<Icon>, u64) {
+    let mut hasher = DefaultHasher::new();
+    png_bytes.hash(&mut hasher);
+    invert.hash(&mut hasher);
+    let icon_hash = hasher.finish();
 
-use crate::jni_callback::JniCallback;
+    let img = image::load_from_memory_with_format(png_bytes, image::ImageFormat::Png);
+    if let Ok(mut img) = img {
+        if invert {
+            img.invert();
+        }
+        let (width, height) = img.dimensions();
+        let mut data = img.into_rgba8().into_vec();
+        for pixel in data.chunks_exact_mut(4) {
+            pixel.rotate_right(1); // rgba to argb
+        }
+        (
+            Some(Icon {
+                width: width as i32,
+                height: height as i32,
+                data,
+            }),
+            icon_hash,
+        )
+    } else {
+        log::error!("invalid png");
+        (None, 0)
+    }
+}
 impl ksni::Tray for PanoTray {
     fn id(&self) -> String {
         "com.arn.scrobble.tray".into()
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        vec![Icon {
-            width: self.data.icon_dim as i32,
-            height: self.data.icon_dim as i32,
-            data: self.data.icon_argb.clone(),
-        }]
+        match &self.prev_icon {
+            Some(icon) => vec![icon.clone()],
+            None => vec![],
+        }
     }
 
     const MENU_ON_ACTIVATE: bool = true;
@@ -98,7 +130,12 @@ pub async fn tray_listener(
         if !tray_init_attempted {
             tray_init_attempted = true;
 
-            let tray = PanoTray { data: tray_data };
+            let (prev_icon, prev_icon_hash) = compute_icon(&tray_data.png_bytes, tray_data.invert);
+            let tray = PanoTray {
+                data: tray_data,
+                prev_icon_hash,
+                prev_icon,
+            };
             match tray.disable_dbus_name(ashpd::is_sandboxed()).spawn().await {
                 Ok(handle) => {
                     let _ = tray_handle.set(handle);
@@ -110,6 +147,11 @@ pub async fn tray_listener(
         } else if let Some(handle) = tray_handle.get() {
             handle
                 .update(|existing_tray| {
+                    let (icon, icon_hash) = compute_icon(&tray_data.png_bytes, tray_data.invert);
+                    if icon_hash != existing_tray.prev_icon_hash && icon.is_some() {
+                        existing_tray.prev_icon = icon;
+                        existing_tray.prev_icon_hash = icon_hash;
+                    }
                     existing_tray.data = tray_data;
                 })
                 .await;

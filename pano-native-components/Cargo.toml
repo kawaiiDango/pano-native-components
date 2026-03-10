@@ -20,6 +20,7 @@ ftail = "0.3"
 zbus = { version = "5.14", default-features = false, features = ["async-io"] }
 futures-util = "0.3"
 ksni = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"] }
 ashpd = { version = "0.13", features = [
     "file_chooser",
     "settings",

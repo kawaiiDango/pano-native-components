@@ -25,7 +25,7 @@ public class PanoNativeComponents {
 
     static native void notify(String title, String body);
 
-    static native void setTrayLinux(String tooltip, int[] argb, int icon_size, String[] menuItemIds, String[] menuItemTexts);
+    static native void setTrayLinux(String tooltip, byte[] pngBytes, boolean invert, String[] menuItemIds, String[] menuItemTexts);
 
     static native String getMachineId();
 

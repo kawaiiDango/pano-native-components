@@ -19,7 +19,7 @@ use jni::sys::{jboolean, jint, jlong};
 use jni::EnvUnowned;
 use jni::jni_sig;
 use jni::jni_str;
-use jni::objects::{JClass, JIntArray, JObjectArray, JString};
+use jni::objects::{JByteArray, JClass, JObjectArray, JString};
 
 use jni_callback::JniCallback;
 use log::LevelFilter;
@@ -166,8 +166,8 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayLinux(
     mut unowned_env: EnvUnowned,
     _class: JClass,
     tooltip: JString,
-    argb: JIntArray,
-    icon_dim: jint,
+    png_bytes: JByteArray,
+    invert: jboolean,
     menu_item_ids: JObjectArray<JString>,
     menu_item_texts: JObjectArray<JString>,
 ) {
@@ -181,25 +181,10 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayLinux(
 
                 let tooltip: String = tooltip.mutf8_chars(env)?.into();
 
-                let len = argb.len(env)?;
-
-                let argb_rust = unsafe { argb.get_elements(env, ReleaseMode::NoCopyBack) }?;
-
-                let mut icon_argb = Vec::<u8>::with_capacity(len * 4);
-
-                for &argb in argb_rust.iter() {
-                    let a = (argb >> 24) as u8;
-                    let r = (argb >> 16) as u8;
-                    let g = (argb >> 8) as u8;
-                    let b = argb as u8;
-
-                    icon_argb.push(a);
-                    icon_argb.push(r);
-                    icon_argb.push(b);
-                    icon_argb.push(g);
-                }
-
-                let icon_dim: u32 = icon_dim as u32;
+                let png_bytes_rust =
+                    unsafe { png_bytes.get_elements(env, ReleaseMode::NoCopyBack) }?.to_vec();
+                // convert vec<i8> to vec<u8>
+                let png_bytes_rust = png_bytes_rust.into_iter().map(|b| b as u8).collect();
 
                 let len = menu_item_ids.len(env)?;
                 let mut menu_items = Vec::<(String, String)>::with_capacity(len);
@@ -213,8 +198,8 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayLinux(
 
                 update_tray(PanoTrayData {
                     tooltip,
-                    icon_argb,
-                    icon_dim,
+                    png_bytes: png_bytes_rust,
+                    invert,
                     menu_items,
                 });
                 Ok(())
