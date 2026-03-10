@@ -1,7 +1,10 @@
-use std::{collections::HashMap, env, str::FromStr, sync::OnceLock, time::Duration};
+use std::{collections::HashMap, str::FromStr, sync::OnceLock, time::Duration};
 
+use ashpd::desktop::{
+    Icon,
+    notification::{DisplayHint, Notification, NotificationProxy, Priority},
+};
 use futures_util::{TryFutureExt, stream::StreamExt};
-use notify_rust::{Hint, Notification, Urgency};
 use tokio::{
     sync::{
         RwLock, RwLockWriteGuard,
@@ -20,7 +23,9 @@ use crate::{
     INCOMING_PLAYER_EVENT_TX, file_picker, ipc,
     jni_callback::JniCallback,
     media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo},
-    media_listener::linux_mpris::{media_player2::MediaPlayer2Proxy, player::PlayerProxy},
+    media_listener::linux_mpris::{
+        autostart, media_player2::MediaPlayer2Proxy, player::PlayerProxy,
+    },
     theme_observer,
 };
 use crate::{media_listener::linux_mpris::metadata::Metadata, tray};
@@ -190,29 +195,48 @@ pub async fn listener(
                         .try_send(JniCallback::FilePicked(*request_id, uri));
                 }
 
-                IncomingEvent::Notification(title, body) => {
-                    let mut notification = Notification::new();
-
-                    notification
-                        .appname("Pano Scrobbler")
-                        .summary(title)
-                        .body(body)
-                        .timeout(10000)
-                        .urgency(Urgency::Normal);
-
-                    if env::var("APPDIR").is_ok() {
-                        notification.auto_icon();
-                        // icon for appimage is at $APPDIR/pano-scrobbler.svg
-                        // notification
-                        //     .icon(&format!("{app_dir}/pano-scrobbler.svg"))
-                        //     .appname("pano-scrobbler");
+                IncomingEvent::AutoStart(add) => {
+                    if ashpd::is_sandboxed() {
+                        autostart::autostart_sandboxed(*add).await;
                     } else {
-                        notification.hint(Hint::DesktopEntry("pano-scrobbler".to_string()));
+                        autostart::autostart(*add);
+                    }
+                }
+
+                IncomingEvent::Notification(title, body) => {
+                    let proxy = NotificationProxy::new().await;
+
+                    if let Ok(proxy) = proxy {
+                        let _ = proxy
+                            .add_notification(
+                                "com.arn.scrobble",
+                                Notification::new(title)
+                                    .body(body.as_str())
+                                    .priority(Priority::Normal)
+                                    .icon(Icon::with_names(["pano-scrobbler"]))
+                                    .display_hint([DisplayHint::Tray]),
+                            )
+                            .await;
                     }
 
-                    if let Err(e) = notification.show_async().await {
-                        log::error!("Error showing notification: {e:?}");
-                    }
+                    // let mut notification = Notification::new();
+
+                    // notification
+                    //     .appname("Pano Scrobbler")
+                    //     .summary(title)
+                    //     .body(body)
+                    //     .timeout(10000)
+                    //     .urgency(Urgency::Normal);
+
+                    // if env::var("APPDIR").is_ok() {
+                    //     notification.auto_icon();
+                    // } else {
+                    //     notification.hint(Hint::DesktopEntry("pano-scrobbler".to_string()));
+                    // }
+
+                    // if let Err(e) = notification.show_async().await {
+                    //     log::error!("Error showing notification: {e:?}");
+                    // }
                 }
             }
         }

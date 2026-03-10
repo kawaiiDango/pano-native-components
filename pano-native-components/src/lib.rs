@@ -162,7 +162,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_notify(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTray(
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_setTrayLinux(
     mut unowned_env: EnvUnowned,
     _class: JClass,
     tooltip: JString,
@@ -237,7 +237,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_getMachineId<'
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_applyDarkModeToWindow(
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_applyDarkModeWindows(
     _env: EnvUnowned,
     _class: JClass,
     handle: jlong,
@@ -271,7 +271,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_sendIpcCommand
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isFileLocked(
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_isFileLockedWindows(
     mut unowned_env: EnvUnowned,
     _class: JClass,
     path: JString,
@@ -533,7 +533,7 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_clearDiscordAc
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_xdgFileChooser(
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_fileChooserLinux(
     mut unowned_env: EnvUnowned,
     _class: JClass,
     request_id: jint,
@@ -566,5 +566,18 @@ pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_xdgFileChooser
                 Ok(())
             })
             .resolve::<jni::errors::ThrowRuntimeExAndDefault>();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_arn_scrobble_PanoNativeComponents_autoStartLinux(
+    _env: EnvUnowned,
+    _class: JClass,
+    add: jboolean,
+) {
+    #[cfg(target_os = "linux")]
+    {
+        let event = IncomingEvent::AutoStart(add);
+        send_incoming_event(event);
     }
 }

@@ -51,5 +51,7 @@ pub enum IncomingEvent {
     Shutdown,
     #[cfg(target_os = "linux")]
     LaunchFilePicker(i32, bool, String, String, Vec<String>),
+    #[cfg(target_os = "linux")]
+    AutoStart(bool),
     Notification(String, String),
 }

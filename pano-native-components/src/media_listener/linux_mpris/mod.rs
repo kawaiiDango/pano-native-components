@@ -1,3 +1,4 @@
+mod autostart;
 mod media_player2;
 mod metadata;
 mod mpris_listener;

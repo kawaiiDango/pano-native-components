@@ -25,23 +25,25 @@ public class PanoNativeComponents {
 
     static native void notify(String title, String body);
 
-    static native void setTray(String tooltip, int[] argb, int icon_size, String[] menuItemIds, String[] menuItemTexts);
+    static native void setTrayLinux(String tooltip, int[] argb, int icon_size, String[] menuItemIds, String[] menuItemTexts);
 
     static native String getMachineId();
 
-    static native void applyDarkModeToWindow(long handle);
+    static native void applyDarkModeWindows(long hwnd);
 
     static native boolean sendIpcCommand(String command, String arg);
 
-    static native boolean isFileLocked(String path);
+    static native boolean isFileLockedWindows(String path);
 
-    static native void xdgFileChooser(int requestId, boolean save, String title, String fileName, String[] filters);
+    static native void fileChooserLinux(int requestId, boolean save, String title, String fileName, String[] filters);
 
     static native void onFilePicked(int requestId, String uri);
 
     static native boolean updateDiscordActivity(String clientId, String name, String state, String details, String largeText, long startTime, long endTime, String artUrl, String detailsUrl, boolean isPlaying, int statusLine, String buttonText, String buttonUrl);
 
     static native boolean clearDiscordActivity(boolean shutdown);
+
+    static native boolean autoStartLinux(boolean add);
 
     static {
         System.loadLibrary("pano_native_components");
@@ -63,7 +65,7 @@ public class PanoNativeComponents {
     ));
 
     public static void main(String[] args) {
-        applyDarkModeToWindow(0);
+        applyDarkModeWindows(0);
         setEnvironmentVariable("GDK_BACKEND", "x11");
 
         sendIpcCommand("testCommand", "testArg");
@@ -105,7 +107,7 @@ public class PanoNativeComponents {
                 for (int i = 0; i < argb.length; i++) {
                     argb[i] = 0xffbebebe;
                 }
-                setTray("tooltip", argb, size, menuItemIds, menuItemTexts);
+                setTrayLinux("tooltip", argb, size, menuItemIds, menuItemTexts);
 
                 // refreshSessions();
 
