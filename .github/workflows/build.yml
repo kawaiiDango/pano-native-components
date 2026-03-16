@@ -19,7 +19,7 @@ jobs:
           resources-dir: linux-arm64
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
 
     - uses: dtolnay/rust-toolchain@stable
 
@@ -30,7 +30,7 @@ jobs:
     - run: cargo update && cargo build --release
 
     - name: Upload binary
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: libs-${{ matrix.resources-dir }}
         path: |
