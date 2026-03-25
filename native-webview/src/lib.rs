@@ -6,6 +6,7 @@ use jni::jni_sig;
 use jni::jni_str;
 use jni::objects::JObjectArray;
 use jni::objects::{JClass, JString};
+use jni::sys::jint;
 
 use crate::webview_event::{WebViewIncomingEvent, WebViewOutgoingEvent};
 
@@ -70,6 +71,8 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_launchWebView(
     callback_prefix: JString,
     cookies_url: JString,
     data_dir: JString,
+    proxy_host: JString,
+    proxy_port: jint,
 ) {
     unowned_env
         .with_env(|env| -> jni::errors::Result<()> {
@@ -77,12 +80,15 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_launchWebView(
             let callback_prefix: String = callback_prefix.mutf8_chars(env)?.into();
             let cookies_url: String = cookies_url.mutf8_chars(env)?.into();
             let data_dir: String = data_dir.mutf8_chars(env)?.into();
+            let proxy_host: String = proxy_host.mutf8_chars(env)?.into();
 
             tao_loop::send_incoming_webview_event(WebViewIncomingEvent::LaunchWebView(
                 url,
                 callback_prefix,
                 cookies_url,
                 data_dir,
+                proxy_host,
+                proxy_port,
             ));
             Ok(())
         })

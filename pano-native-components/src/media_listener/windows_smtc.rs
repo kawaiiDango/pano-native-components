@@ -5,6 +5,7 @@ use crate::{ipc, theme_observer};
 use notify_rust::Notification;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use windows::ApplicationModel::AppInfo;
 use windows::Foundation::TypedEventHandler;
@@ -248,6 +249,29 @@ fn session_id(session: &GlobalSystemMediaTransportControlsSession) -> String {
     // format!("{:X}", ptr)
 }
 
+#[derive(Debug, Default)]
+struct ThrottleInfo {
+    last_processed: Option<Instant>,
+    event_pending: bool,
+}
+
+impl ThrottleInfo {
+    fn should_throttle(&self) -> bool {
+        self.last_processed
+            .map(|t| t.elapsed().as_millis() < 500)
+            .unwrap_or(false)
+    }
+
+    fn mark_processed(&mut self) {
+        self.last_processed = Some(Instant::now());
+        self.event_pending = false;
+    }
+
+    fn mark_pending(&mut self) {
+        self.event_pending = true;
+    }
+}
+
 #[derive(Debug)]
 struct SessionTracker {
     session: GlobalSystemMediaTransportControlsSession,
@@ -275,13 +299,14 @@ impl Drop for SessionTracker {
 impl SessionTracker {
     fn new(session: GlobalSystemMediaTransportControlsSession) -> Self {
         let playback_info_cached1 = Arc::new(Mutex::<Option<PlaybackInfo>>::new(None));
-        let playback_info_cached2 = playback_info_cached1.clone();
-        let playback_info_cached3 = playback_info_cached1.clone();
         let metadata_info_cached1 = Arc::new(Mutex::<Option<MetadataInfo>>::new(None));
-        let metadata_info_cached2 = metadata_info_cached1.clone();
-        let metadata_info_cached3 = metadata_info_cached1.clone();
+        let timeline_throttle_info1 = Arc::new(Mutex::<ThrottleInfo>::new(ThrottleInfo::default()));
         let sess_id = session_id(&session);
         let id = sess_id.clone();
+
+        let metadata_info_cached = metadata_info_cached1.clone();
+        let playback_info_cached = playback_info_cached1.clone();
+        let timeline_throttle_info = timeline_throttle_info1.clone();
 
         let playback_info_token = session
             .PlaybackInfoChanged(&TypedEventHandler::<
@@ -291,13 +316,24 @@ impl SessionTracker {
                 match session.as_ref() {
                     Some(session) => {
                         if let Some(playback_info) = Self::handle_playback_info_changed(session) {
-                            let mut guard = playback_info_cached1.lock().unwrap();
-                            *guard = Some(playback_info.clone());
+                            let mut playback_info_guard = playback_info_cached.lock().unwrap();
+                            *playback_info_guard = Some(playback_info.clone());
 
                             send_outgoing_event(JniCallback::PlaybackStateChanged(
                                 id.clone(),
                                 playback_info,
                             ));
+
+                            let mut throttle_info = timeline_throttle_info.lock().unwrap();
+
+                            if throttle_info.event_pending {
+                                Self::process_timeline_event(
+                                    session,
+                                    &mut metadata_info_cached.lock().unwrap(),
+                                    &mut playback_info_guard,
+                                    &mut throttle_info,
+                                );
+                            }
                         }
                     }
                     None => {
@@ -312,6 +348,10 @@ impl SessionTracker {
             });
 
         let id = sess_id.clone();
+        let metadata_info_cached = metadata_info_cached1.clone();
+        let playback_info_cached = playback_info_cached1.clone();
+        let timeline_throttle_info = timeline_throttle_info1.clone();
+
         let media_properties_token = session
             .MediaPropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
@@ -321,19 +361,33 @@ impl SessionTracker {
                     Some(session) => {
                         if let Some(metadata_info) = Self::handle_media_properties_changed(session)
                         {
-                            let mut guard = metadata_info_cached1.lock().unwrap();
-                            let duration = guard.as_ref().map(|x| x.duration).unwrap_or(-1);
+                            let mut metadata_info_guard = metadata_info_cached.lock().unwrap();
+                            let duration = metadata_info_guard
+                                .as_ref()
+                                .map(|x| x.duration)
+                                .unwrap_or(-1);
 
                             let metadata_info = MetadataInfo {
                                 duration,
                                 ..metadata_info
                             };
-                            *guard = Some(metadata_info.clone());
+                            *metadata_info_guard = Some(metadata_info.clone());
 
                             send_outgoing_event(JniCallback::MetadataChanged(
                                 id.clone(),
                                 metadata_info,
                             ));
+
+                            let mut throttle_info = timeline_throttle_info.lock().unwrap();
+
+                            if throttle_info.event_pending {
+                                Self::process_timeline_event(
+                                    session,
+                                    &mut metadata_info_guard,
+                                    &mut playback_info_cached.lock().unwrap(),
+                                    &mut throttle_info,
+                                );
+                            }
                         }
                     }
                     None => {
@@ -347,7 +401,9 @@ impl SessionTracker {
                 0
             });
 
-        let id = sess_id.clone();
+        let metadata_info_cached = metadata_info_cached1.clone();
+        let playback_info_cached = playback_info_cached1.clone();
+        let timeline_throttle_info = timeline_throttle_info1;
         let timeline_properties_token = session
             .TimelinePropertiesChanged(&TypedEventHandler::<
                 GlobalSystemMediaTransportControlsSession,
@@ -355,50 +411,21 @@ impl SessionTracker {
             >::new(move |session, _| {
                 match session.as_ref() {
                     Some(session) => {
-                        if let Some((duration, position)) =
-                            Self::handle_timeline_properties_changed(session)
-                        {
-                            // println!("position: {}, duration: {}", position, duration);
+                        // rate limit this to prevent spam while scrubbing
+                        // e.g. if 15 events come in within 500ms, only send the last one
+                        // to fix "Error sending outgoing event: no available capacity"
 
-                            // on windows, the duration may get updated much later than the media properties
+                        let mut throttle_info = timeline_throttle_info.lock().unwrap();
 
-                            if duration != -1 {
-                                let mut guard = metadata_info_cached2.lock().unwrap();
-
-                                if let Some(last_metadata_info) = &mut *guard
-                                    && last_metadata_info.duration != duration
-                                {
-                                    last_metadata_info.duration = duration;
-                                    // report the updated metadata with duration
-                                    send_outgoing_event(JniCallback::MetadataChanged(
-                                        id.clone(),
-                                        last_metadata_info.clone(),
-                                    ));
-                                }
-                            }
-
-                            if position != -1 {
-                                let mut guard = playback_info_cached2.lock().unwrap();
-                                if let Some(last_playback_info) = &mut *guard {
-                                    last_playback_info.position = position;
-
-                                    // report the updated playback info
-                                    send_outgoing_event(JniCallback::PlaybackStateChanged(
-                                        id.clone(),
-                                        last_playback_info.clone(),
-                                    ));
-                                } else {
-                                    // let playback_info = PlaybackInfo {
-                                    //     state: PlaybackState::None,
-                                    //     can_skip: false,
-                                    //     position,
-                                    // };
-                                    // send_outgoing_event(JniCallback::PlaybackStateChanged(
-                                    //     id.clone(),
-                                    //     playback_info,
-                                    // ));
-                                }
-                            }
+                        if throttle_info.should_throttle() {
+                            throttle_info.mark_pending();
+                        } else {
+                            Self::process_timeline_event(
+                                session,
+                                &mut metadata_info_cached.lock().unwrap(),
+                                &mut playback_info_cached.lock().unwrap(),
+                                &mut throttle_info,
+                            );
                         }
                     }
                     None => {
@@ -423,7 +450,7 @@ impl SessionTracker {
                 duration,
                 ..metadata_info
             };
-            metadata_info_cached3
+            metadata_info_cached1
                 .lock()
                 .unwrap()
                 .replace(metadata_info.clone());
@@ -435,7 +462,7 @@ impl SessionTracker {
                 position,
                 ..playback_info
             };
-            playback_info_cached3
+            playback_info_cached1
                 .lock()
                 .unwrap()
                 .replace(playback_info.clone());
@@ -604,5 +631,46 @@ impl SessionTracker {
         } else {
             None
         }
+    }
+
+    fn process_timeline_event(
+        session: &GlobalSystemMediaTransportControlsSession,
+        last_metadata_info: &mut Option<MetadataInfo>,
+        last_playback_info: &mut Option<PlaybackInfo>,
+        throttle_info: &mut ThrottleInfo,
+    ) {
+        let id = session_id(session);
+
+        if let Some((duration, position)) = Self::handle_timeline_properties_changed(session) {
+            // println!("position: {}, duration: {}", position, duration);
+
+            // on windows, the duration may get updated much later than the media properties
+
+            if duration != -1
+                && let Some(last_metadata_info) = last_metadata_info
+                && last_metadata_info.duration != duration
+            {
+                last_metadata_info.duration = duration;
+                // report the updated metadata with duration
+                send_outgoing_event(JniCallback::MetadataChanged(
+                    id.clone(),
+                    last_metadata_info.clone(),
+                ));
+            }
+
+            if position != -1
+                && let Some(last_playback_info) = last_playback_info
+            {
+                last_playback_info.position = position;
+
+                // report the updated playback info
+                send_outgoing_event(JniCallback::PlaybackStateChanged(
+                    id.clone(),
+                    last_playback_info.clone(),
+                ));
+            }
+        }
+
+        throttle_info.mark_processed();
     }
 }

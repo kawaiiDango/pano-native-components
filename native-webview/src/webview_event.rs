@@ -1,6 +1,6 @@
 #[derive(Debug, Clone)]
 pub enum WebViewIncomingEvent {
-    LaunchWebView(String, String, String, String),
+    LaunchWebView(String, String, String, String, String, i32),
     SendCallback(String, String),
     DeleteAndQuit,
 }

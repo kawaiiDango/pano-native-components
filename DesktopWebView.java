@@ -6,7 +6,7 @@ package com.arn.scrobble;
 public class DesktopWebView {
     private static native void startEventLoop();
 
-    static native void launchWebView(String url, String callbackPrefix, String cookiesUrl, String dataDir);
+    static native void launchWebView(String url, String callbackPrefix, String cookiesUrl, String dataDir, String proxyHost, int proxyPort);
 
     static native void deleteAndQuit();
 
@@ -16,7 +16,7 @@ public class DesktopWebView {
 
     public static void main(String[] args) {
 
-        launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview");
+        launchWebView("https://fonts.google.com", "callbackPrefix", "/tmp/webview", "", 0);
         
         new Thread(new Runnable() {
             @Override

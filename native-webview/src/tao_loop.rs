@@ -5,7 +5,7 @@ use tao::{
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
-use wry::{WebContext, WebView, WebViewBuilder, dpi::LogicalSize};
+use wry::{ProxyConfig, ProxyEndpoint, WebContext, WebView, WebViewBuilder, dpi::LogicalSize};
 
 use crate::webview_event::{WebViewIncomingEvent, WebViewOutgoingEvent};
 
@@ -75,6 +75,8 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                 callback_prefix,
                 cookies_url,
                 data_dir,
+                proxy_host,
+                proxy_port,
             )) => {
                 let window = WindowBuilder::new()
                     .with_title("WebView")
@@ -85,7 +87,7 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
 
                 let mut context = WebContext::new(Some(PathBuf::from(data_dir)));
 
-                let builder = WebViewBuilder::new_with_web_context(&mut context)
+                let mut builder = WebViewBuilder::new_with_web_context(&mut context)
                     // WebViewBuilder::new()
                     .with_url(&url)
                     .with_navigation_handler(move |url| {
@@ -101,6 +103,13 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                             true
                         }
                     });
+
+                if proxy_host != "" && proxy_port != 0 {
+                    builder = builder.with_proxy_config(ProxyConfig::Socks5(ProxyEndpoint {
+                        host: proxy_host.clone(),
+                        port: proxy_port.to_string(),
+                    }));
+                }
 
                 #[cfg(target_os = "windows")]
                 let webview = builder.build(&window);
