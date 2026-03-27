@@ -9,9 +9,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jni = "0.22"
-wry = { version = "0.54", default-features = false, features = [
+wry = { version = "0.55", default-features = false, features = [
     "os-webview",
     "protocol",
     "x11",
 ] }
-tao = "0.34"
+tao = "0.35"
