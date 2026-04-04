@@ -81,9 +81,17 @@ impl ksni::Tray for PanoTray {
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
+        // title is the first line of the tooltip, description is the rest.
+        // if the tooltip is only one line, the description will be empty
+        // also handle the case where the tooltip is empty
+
+        let mut lines = self.data.tooltip.trim().lines();
+        let title = lines.next().unwrap_or("").to_string();
+        let description = lines.collect::<Vec<&str>>().join("\n");
+
         ksni::ToolTip {
-            title: "Pano Scrobbler".to_string(),
-            description: self.data.tooltip.clone(),
+            title,
+            description,
             ..Default::default()
         }
     }

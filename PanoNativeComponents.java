@@ -103,11 +103,14 @@ public class PanoNativeComponents {
                 String menuItemTexts[] = new String[] { "📝 item_1", "item_2", "item_3", "", "item_4" };
 
                 int size = 8;
-                int[] argb = new int[size * size];
-                for (int i = 0; i < argb.length; i++) {
-                    argb[i] = 0xffbebebe;
+                byte[] argb = new byte[size * size * 4];
+                for (int i = 0; i < argb.length; i += 4) {
+                    argb[i] = (byte) 0xff;
+                    argb[i + 1] = (byte) 0xbe;
+                    argb[i + 2] = (byte) 0xbe;
+                    argb[i + 3] = (byte) 0xbe;
                 }
-                setTrayLinux("tooltip", argb, size, menuItemIds, menuItemTexts);
+                setTrayLinux("", argb, false, menuItemIds, menuItemTexts);
 
                 // refreshSessions();
 

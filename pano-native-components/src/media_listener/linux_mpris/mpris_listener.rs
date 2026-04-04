@@ -32,6 +32,17 @@ use crate::{media_listener::linux_mpris::metadata::Metadata, tray};
 
 const MPRIS2_PREFIX: &str = "org.mpris.MediaPlayer2.";
 
+#[derive(Debug)]
+pub struct ShutdownListenerError {}
+
+impl std::error::Error for ShutdownListenerError {}
+
+impl std::fmt::Display for ShutdownListenerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MPRIS listener is shutting down")
+    }
+}
+
 struct PlayerListenerHandle {
     join_handle: JoinHandle<zbus::Result<()>>,
     incoming_player_event_tx: Sender<IncomingEvent>,
@@ -178,7 +189,7 @@ pub async fn listener(
                     dbus_names_to_identities.write().await.clear();
 
                     // produce some error to stop the tasks
-                    return Result::Err(std::io::Error::other("Shutting down MPRIS listener"));
+                    return Result::Err(ShutdownListenerError {});
                 }
 
                 IncomingEvent::LaunchFilePicker(request_id, save, title, file_name, filters) => {
@@ -321,16 +332,25 @@ pub async fn listener(
 
     let theme_observer = theme_observer::observe(outgoing_tx);
 
-    tokio::try_join!(
+    let exit_res = tokio::try_join!(
         incoming_events.map_err(Into::into),
         mpris_events.map_err(Into::into),
         ipc_commands,
         tray,
         outgoing_events,
         theme_observer,
-    )?;
+    );
 
-    Ok(())
+    match exit_res {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if e.downcast_ref::<ShutdownListenerError>().is_some() {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 async fn player_listeners(

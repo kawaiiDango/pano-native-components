@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 jni = "0.22"
 strum = { version = "0.28", features = ["derive"] }
-tokio = { version = "1.50", features = ["rt", "sync", "macros", "time"] }
+tokio = { version = "1.51", features = ["rt", "sync", "macros", "time"] }
 interprocess = { version = "2.4", features = ["tokio"] }
 discord-rich-presence = "1.1"
 log = "0.4"
