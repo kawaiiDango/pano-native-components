@@ -104,7 +104,7 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                         }
                     });
 
-                if proxy_host != "" && proxy_port != 0 {
+                if !proxy_host.is_empty() && proxy_port != 0 {
                     builder = builder.with_proxy_config(ProxyConfig::Socks5(ProxyEndpoint {
                         host: proxy_host.clone(),
                         port: proxy_port.to_string(),
@@ -140,10 +140,11 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                 }
             }
 
-            Event::WindowEvent { event, .. } => {
-                if event == WindowEvent::CloseRequested {
-                    webview_window.take();
-                }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                webview_window.take();
             }
 
             Event::UserEvent(WebViewIncomingEvent::DeleteAndQuit) => {
