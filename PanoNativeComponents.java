@@ -29,13 +29,13 @@ public class PanoNativeComponents {
 
     static native String getMachineId();
 
-    static native void applyDarkModeWindows(long hwnd);
+    static native void setHwndWindows(long hwnd);
 
     static native boolean sendIpcCommand(String command, String arg);
 
     static native boolean isFileLockedWindows(String path);
 
-    static native void fileChooserLinux(int requestId, boolean save, String title, String fileName, String[] filters);
+    static native void fileChooser(int requestId, boolean save, String title, String fileName, String[] filters);
 
     static native void onFilePicked(int requestId, String uri);
 
@@ -44,6 +44,8 @@ public class PanoNativeComponents {
     static native boolean clearDiscordActivity(boolean shutdown);
 
     static native boolean autoStartLinux(boolean add);
+
+    static native void openUrl(String url);
 
     static {
         System.loadLibrary("pano_native_components");

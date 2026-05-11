@@ -1,8 +1,27 @@
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 
 use ashpd::desktop::background::Background;
+
+fn get_exec_for_autostart() -> String {
+    let self_path = std::env::current_exe().and_then(fs::canonicalize).ok();
+
+    let in_path = std::env::var("PATH").ok().and_then(|path_var| {
+        path_var
+            .split(':')
+            .map(|dir| Path::new(dir).join("pano-scrobbler"))
+            .find(|p| p.is_file())
+            .and_then(|p| fs::canonicalize(p).ok())
+    });
+
+    match (self_path, in_path) {
+        (Some(s), Some(p)) if s == p => "pano-scrobbler".to_string(),
+        (Some(s), _) => s.to_string_lossy().into_owned(),
+        _ => "pano-scrobbler".to_string(),
+    }
+}
 
 pub fn autostart(add: bool) {
     let desktop_file = env::var("XDG_CONFIG_HOME")
@@ -28,13 +47,7 @@ pub fn autostart(add: bool) {
         let exec_path = if let Ok(appimage) = env::var("APPIMAGE") {
             appimage
         } else {
-            match env::current_exe() {
-                Ok(path) => path.display().to_string(),
-                Err(e) => {
-                    log::error!("Failed to get current executable path: {e}");
-                    return;
-                }
-            }
+            get_exec_for_autostart()
         };
 
         // Escape embedded double-quotes before wrapping in quotes per XDG spec

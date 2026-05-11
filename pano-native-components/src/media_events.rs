@@ -49,8 +49,8 @@ pub enum IncomingEvent {
     Unmute(String),
     RefreshSessions,
     Shutdown,
-    #[cfg(target_os = "linux")]
-    LaunchFilePicker(i32, bool, String, String, Vec<String>),
+    OpenUrl(String),
+    LaunchFilePicker(i32, i64, bool, String, String, Vec<String>),
     #[cfg(target_os = "linux")]
     AutoStart(bool),
     Notification(String, String),

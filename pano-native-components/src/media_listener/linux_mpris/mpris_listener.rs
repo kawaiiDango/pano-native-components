@@ -3,6 +3,7 @@ use std::{collections::HashMap, str::FromStr, sync::OnceLock, time::Duration};
 use ashpd::desktop::{
     Icon,
     notification::{DisplayHint, Notification, NotificationProxy, Priority},
+    open_uri::{OpenFileOptions, OpenFileRequest, OpenURIProxy},
 };
 use futures_util::{TryFutureExt, stream::StreamExt};
 use tokio::{
@@ -24,7 +25,8 @@ use crate::{
     jni_callback::JniCallback,
     media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo},
     media_listener::linux_mpris::{
-        autostart, media_player2::MediaPlayer2Proxy, player::PlayerProxy,
+        autostart, media_player2::MediaPlayer2Proxy, notifications::NotificationsProxy,
+        player::PlayerProxy,
     },
     theme_observer,
 };
@@ -91,13 +93,19 @@ pub async fn listener(
 
     // listener just started, poll existing values
 
-    let dbus_names = dbus_proxy
-        .list_names()
-        .await?
-        .into_iter()
-        .filter(|name| name.starts_with(MPRIS2_PREFIX));
+    let dbus_names = dbus_proxy.list_names().await;
+    let dbus_names_filtered = match dbus_names {
+        Ok(names) => names
+            .into_iter()
+            .filter(|name| name.starts_with(MPRIS2_PREFIX))
+            .collect::<Vec<_>>(),
+        Err(e) => {
+            log::error!("Failed to list DBus names: {e}");
+            Vec::new()
+        }
+    };
 
-    for dbus_name in dbus_names {
+    for dbus_name in dbus_names_filtered {
         if !names_to_handles
             .read()
             .await
@@ -192,12 +200,24 @@ pub async fn listener(
                     return Result::Err(ShutdownListenerError {});
                 }
 
-                IncomingEvent::LaunchFilePicker(request_id, save, title, file_name, filters) => {
+                IncomingEvent::LaunchFilePicker(
+                    request_id,
+                    _hwnd,
+                    save,
+                    title,
+                    file_name,
+                    extensions,
+                ) => {
+                    let filters = extensions
+                        .iter()
+                        .map(|x| format!("*{x}"))
+                        .collect::<Vec<_>>();
+
                     let uri = file_picker::launch_file_picker(
                         *save,
                         title.clone(),
                         file_name.clone(),
-                        filters.clone(),
+                        filters,
                     )
                     .await;
                     let _ = OUTGOING_PLAYER_EVENT_TX
@@ -215,39 +235,51 @@ pub async fn listener(
                 }
 
                 IncomingEvent::Notification(title, body) => {
-                    let proxy = NotificationProxy::new().await;
+                    if ashpd::is_sandboxed() {
+                        let proxy = NotificationProxy::new().await;
 
-                    if let Ok(proxy) = proxy {
-                        let _ = proxy
-                            .add_notification(
-                                "com.arn.scrobble",
-                                Notification::new(title)
-                                    .body(body.as_str())
-                                    .priority(Priority::Normal)
-                                    .icon(Icon::with_names(["pano-scrobbler"]))
-                                    .display_hint([DisplayHint::Tray]),
-                            )
-                            .await;
+                        if let Ok(proxy) = proxy {
+                            let _ = proxy
+                                .add_notification(
+                                    "com.arn.scrobble",
+                                    Notification::new(title)
+                                        .body(body.as_str())
+                                        .priority(Priority::Normal)
+                                        .icon(Icon::with_names(["pano-scrobbler"]))
+                                        .display_hint([DisplayHint::Tray]),
+                                )
+                                .await;
+                        }
+                    } else {
+                        let proxy = NotificationsProxy::new(&connection).await;
+                        if let Ok(proxy) = proxy {
+                            let _ = proxy
+                                .notify(
+                                    "Pano Scrobbler",
+                                    0,
+                                    "pano-scrobbler",
+                                    title,
+                                    body,
+                                    &[],
+                                    HashMap::new(),
+                                    10000,
+                                )
+                                .await;
+                        }
                     }
+                }
 
-                    // let mut notification = Notification::new();
+                IncomingEvent::OpenUrl(url) => {
+                    let proxy = OpenURIProxy::new().await;
+                    if let Ok(proxy) = proxy {
+                        let uri = ashpd::Uri::parse(url).unwrap();
 
-                    // notification
-                    //     .appname("Pano Scrobbler")
-                    //     .summary(title)
-                    //     .body(body)
-                    //     .timeout(10000)
-                    //     .urgency(Urgency::Normal);
-
-                    // if env::var("APPDIR").is_ok() {
-                    //     notification.auto_icon();
-                    // } else {
-                    //     notification.hint(Hint::DesktopEntry("pano-scrobbler".to_string()));
-                    // }
-
-                    // if let Err(e) = notification.show_async().await {
-                    //     log::error!("Error showing notification: {e:?}");
-                    // }
+                        if url.starts_with("file://") {
+                            let _ = OpenFileRequest::default().ask(true).send_uri(&uri).await;
+                        } else {
+                            let _ = proxy.open_uri(None, &uri, OpenFileOptions::default()).await;
+                        }
+                    }
                 }
             }
         }

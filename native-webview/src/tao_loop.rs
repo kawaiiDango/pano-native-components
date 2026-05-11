@@ -147,11 +147,19 @@ pub fn event_loop(jni_callback: impl Fn(WebViewOutgoingEvent) + 'static) {
                 webview_window.take();
             }
 
-            Event::UserEvent(WebViewIncomingEvent::DeleteAndQuit) => {
+            Event::UserEvent(WebViewIncomingEvent::Close) => {
                 if let Some((_, webview, _)) = &webview_window {
                     let _ = webview.clear_all_browsing_data();
                 }
                 webview_window.take();
+            }
+
+            Event::UserEvent(WebViewIncomingEvent::Quit) => {
+                if let Some((_, webview, _)) = &webview_window {
+                    let _ = webview.clear_all_browsing_data();
+                }
+                webview_window.take();
+                *control_flow = ControlFlow::Exit;
             }
 
             _ => (),

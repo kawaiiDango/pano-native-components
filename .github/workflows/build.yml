@@ -25,7 +25,7 @@ jobs:
 
     - name: Install dependencies
       if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev
+      run: sudo apt-get update && sudo apt-get install -y libwebkitgtk-6.0-dev
 
     - run: cargo update && cargo build --release
 

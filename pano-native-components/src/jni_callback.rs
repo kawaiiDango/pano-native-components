@@ -4,7 +4,6 @@ use crate::media_events::{MetadataInfo, PlaybackInfo, SessionInfo};
 pub enum JniCallback {
     #[cfg(target_os = "linux")]
     TrayItemClicked(String),
-    #[cfg(target_os = "linux")]
     FilePicked(i32, String),
     SessionsChanged(Vec<SessionInfo>),
     MetadataChanged(String, MetadataInfo),

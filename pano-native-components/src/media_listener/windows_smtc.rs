@@ -1,19 +1,24 @@
 use crate::INCOMING_PLAYER_EVENT_TX;
+use crate::file_picker::launch_file_picker;
 use crate::jni_callback::JniCallback;
 use crate::media_events::{IncomingEvent, MetadataInfo, PlaybackInfo, PlaybackState, SessionInfo};
 use crate::{ipc, theme_observer};
-use notify_rust::Notification;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use windows::ApplicationModel::AppInfo;
 use windows::Foundation::TypedEventHandler;
+use windows::Foundation::Uri;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus, MediaPropertiesChangedEventArgs,
     PlaybackInfoChangedEventArgs, SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
 };
+use windows::System::Launcher;
+use windows::UI::Notifications::ToastTemplateType;
+use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+use windows_core::HSTRING;
 
 // static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
@@ -112,18 +117,38 @@ pub async fn listener(
                 }
 
                 IncomingEvent::Notification(title, body) => {
-                    let mut notification = Notification::new();
-
-                    const AUMID: &str = "com.arn.scrobble";
-
-                    notification
-                        .summary(&title)
-                        .body(&body)
-                        .timeout(10000)
-                        .app_id(AUMID);
-
-                    if let Err(e) = notification.show() {
+                    if let Err(e) = show_notification(&title, &body) {
                         log::error!("Error showing notification: {e:?}");
+                    }
+                }
+
+                IncomingEvent::LaunchFilePicker(
+                    request_id,
+                    hwnd,
+                    save,
+                    _title,
+                    file_name,
+                    extensions,
+                ) => {
+                    let file_path = launch_file_picker(hwnd, save, file_name, extensions).await;
+
+                    if let Ok(path) = file_path {
+                        send_outgoing_event(JniCallback::FilePicked(request_id, path.to_string()));
+                    } else {
+                        send_outgoing_event(JniCallback::FilePicked(request_id, "".to_string()));
+                    }
+                }
+
+                IncomingEvent::OpenUrl(url) => {
+                    let url_hstring = HSTRING::from(url.clone());
+                    let uri = Uri::CreateUri(&url_hstring);
+
+                    if let Ok(uri) = uri {
+                        let res = Launcher::LaunchUriAsync(&uri);
+
+                        if let Err(e) = res {
+                            log::error!("Error launching URL {e:?}");
+                        }
                     }
                 }
 
@@ -673,4 +698,24 @@ impl SessionTracker {
 
         throttle_info.mark_processed();
     }
+}
+
+fn show_notification(title: &str, body: &str) -> windows::core::Result<()> {
+    const AUMID: &str = "com.arn.scrobble";
+
+    let template = ToastTemplateType::ToastText02;
+    let toast_xml = ToastNotificationManager::GetTemplateContent(template)?;
+    let text_nodes = toast_xml.GetElementsByTagName(&HSTRING::from("text"))?;
+    text_nodes
+        .Item(0)?
+        .AppendChild(&toast_xml.CreateTextNode(&HSTRING::from(title))?)?;
+    text_nodes
+        .Item(1)?
+        .AppendChild(&toast_xml.CreateTextNode(&HSTRING::from(body))?)?;
+
+    let toast = ToastNotification::CreateToastNotification(&toast_xml)?;
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?;
+    notifier.Show(&toast)?;
+
+    Ok(())
 }

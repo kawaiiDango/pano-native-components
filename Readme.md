@@ -8,7 +8,7 @@ A JNI lib, used for accessing some native APIs on desktop, that are not possible
 cargo build --release
 ```
 
-Linux needs additional dependencies listed at [tauri-apps/wry](https://github.com/tauri-apps/wry)
+Linux may need distro specific dev dependencies for webkit6
 
 ### Test
 
