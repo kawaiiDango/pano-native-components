@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use windows::ApplicationModel::AppInfo;
+use windows::Data::Xml::Dom::XmlDocument;
 use windows::Foundation::TypedEventHandler;
 use windows::Foundation::Uri;
 use windows::Media::Control::{
@@ -16,8 +17,8 @@ use windows::Media::Control::{
     PlaybackInfoChangedEventArgs, SessionsChangedEventArgs, TimelinePropertiesChangedEventArgs,
 };
 use windows::System::Launcher;
-use windows::UI::Notifications::ToastTemplateType;
-use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+use windows::UI::Notifications::ToastNotification;
+use windows::UI::Notifications::ToastNotificationManager;
 use windows_core::HSTRING;
 
 // static ALBUM_ART_ENABLED: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
@@ -146,8 +147,20 @@ pub async fn listener(
                     if let Ok(uri) = uri {
                         let res = Launcher::LaunchUriAsync(&uri);
 
-                        if let Err(e) = res {
-                            log::error!("Error launching URL {e:?}");
+                        match res {
+                            Ok(launched_operation) => match launched_operation.await {
+                                Err(e) => {
+                                    log::error!("Error launching URI {e:?}");
+                                }
+                                Ok(launched) => {
+                                    if !launched {
+                                        log::error!("Failed to launch URI: false");
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                log::error!("Error launching URI {e:?}");
+                            }
                         }
                     }
                 }
@@ -703,8 +716,18 @@ impl SessionTracker {
 fn show_notification(title: &str, body: &str) -> windows::core::Result<()> {
     const AUMID: &str = "com.arn.scrobble";
 
-    let template = ToastTemplateType::ToastText02;
-    let toast_xml = ToastNotificationManager::GetTemplateContent(template)?;
+    let template = r#"
+        <toast activationType="protocol" launch="">
+            <visual>
+                <binding template="ToastGeneric">
+                    <text></text>
+                    <text></text>
+                </binding>
+            </visual>
+        </toast>
+    "#;
+    let toast_xml = XmlDocument::new()?;
+    toast_xml.LoadXml(&HSTRING::from(template))?;
     let text_nodes = toast_xml.GetElementsByTagName(&HSTRING::from("text"))?;
     text_nodes
         .Item(0)?
@@ -713,7 +736,19 @@ fn show_notification(title: &str, body: &str) -> windows::core::Result<()> {
         .Item(1)?
         .AppendChild(&toast_xml.CreateTextNode(&HSTRING::from(body))?)?;
 
+    // put self exe path in the protocol arguments
+    let exe_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    toast_xml
+        .DocumentElement()?
+        .SetAttribute(&HSTRING::from("launch"), &HSTRING::from(exe_path))?;
+
     let toast = ToastNotification::CreateToastNotification(&toast_xml)?;
+    toast.SetExpiresOnReboot(true)?;
+
     let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?;
     notifier.Show(&toast)?;
 
