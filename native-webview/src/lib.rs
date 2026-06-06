@@ -23,13 +23,14 @@ pub extern "system" fn Java_com_arn_scrobble_DesktopWebView_startEventLoop(
     mut unowned_env: EnvUnowned,
     _class: JClass,
 ) {
-    // on proprietary nvidia drivers, set WEBKIT_DISABLE_DMABUF_RENDERER=1
+    // on nvidia and nvidia-open drivers, set WEBKIT_DISABLE_DMABUF_RENDERER=1
     // by checking if /proc/driver/nvidia/version exists
 
     #[cfg(target_os = "linux")]
     if std::path::Path::new("/proc/driver/nvidia/version").exists() {
         unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
-        eprintln!("Using proprietary nvidia driver workaround");
+        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+        eprintln!("Using nvidia driver workaround");
     }
 
     unowned_env
