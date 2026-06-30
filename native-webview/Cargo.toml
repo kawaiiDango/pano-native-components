@@ -22,5 +22,5 @@ time = { version = "=0.3.51", default-features = false, features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit6 = "0.6"
-gtk4 = "0.11"
+gtk4 = { version = "0.11", features = ["v4_10"] }
 async-channel = "2"
