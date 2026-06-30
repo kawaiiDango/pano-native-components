@@ -652,9 +652,9 @@ impl SessionTracker {
             let start_time = timeline_properties
                 .StartTime()
                 .map(|x| x.Duration / 10000)
-                .unwrap_or_default();
+                .unwrap_or(-1);
 
-            let duration = if end_time == -1 {
+            let duration = if end_time == -1 || start_time == -1 {
                 -1
             } else {
                 end_time - start_time

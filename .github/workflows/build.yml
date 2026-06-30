@@ -9,17 +9,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-2025-vs2026, ubuntu-22.04, ubuntu-24.04-arm]
+        os: [windows-2025-vs2026, ubuntu-24.04, ubuntu-24.04-arm]
         include:
         - os: windows-2025-vs2026
           resources-dir: windows-x64
-        - os: ubuntu-22.04
+        - os: ubuntu-24.04
           resources-dir: linux-x64
         - os: ubuntu-24.04-arm
           resources-dir: linux-arm64
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - uses: dtolnay/rust-toolchain@stable
 
@@ -30,7 +30,7 @@ jobs:
     - run: cargo update && cargo build --release
 
     - name: Upload binary
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: libs-${{ matrix.resources-dir }}
         path: |
